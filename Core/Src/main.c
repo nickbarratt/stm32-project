@@ -104,6 +104,7 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM3_Init();
   MX_USART1_UART_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   // This starts the hardware PWM on the specified channels
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
@@ -148,16 +149,7 @@ int main(void)
     }
 
     // 2. BUTTON LOGIC (Always responsive!)
- //   if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4) == GPIO_PIN_RESET) {
- //       dimmedLevel = 20; // Brighter blink
- //       printf("K0 Pressed: Brightness set to HIGH (20%%)\r\n");
- //   }
- //   if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
- //       dimmedLevel = 2;  // Very dim blink
- //       printf("K1 Pressed: Brightness set to LOW (5%%)\r\n");
- //   }
-    
-    
+  
     // Check K0
 		uint8_t k0_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4); // Adjust port/pin for K0
 		if (k0_current == 0 && k0_last_state == 1) {
