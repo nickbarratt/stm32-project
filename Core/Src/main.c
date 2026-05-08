@@ -49,6 +49,9 @@
 uint8_t k0_last_state = 1; // Assuming pull-up (1 = released)
 uint8_t k1_last_state = 1;
 
+uint32_t duty_cycle = 500;
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -107,22 +110,24 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   // This starts the hardware PWM on the specified channels
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); 
+	printf("PWM System Active at 1kHz\r\n");
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 	
 	// Enable Clock for Port A
   __HAL_RCC_GPIOA_CLK_ENABLE();
+
   uint32_t lastBlinkTime = 0;
-  //uint16_t brightness = 10; // Declare it here! 50 = 50% brightness
-	uint8_t ledIsOn = 0;
-	uint16_t dimmedLevel = 10; // Set your desired dimness here
+  uint8_t ledIsOn = 0;
+  uint16_t dimmedLevel = 10; // Set your desired dimness here
 
 
 // Clear the terminal screen and reset cursor (ANSI escape codes)
 	printf("\033[2J\033[H"); 
 	printf("=================================\r\n");
 	printf("   JL32-F4VE System Initialised  \r\n");
-	printf("   PWM Frequency: 1kHz           \r\n");
+	printf("   PWM Frequency: 1kHz  (PE9)    \r\n");
 	printf("=================================\r\n");
 
   /* USER CODE END 2 */
@@ -132,8 +137,7 @@ int main(void)
   while (1)
   {
   	
-	
-		// 1. BLINK LOGIC (Non-blocking)
+  	// 1. BLINK LOGIC (Non-blocking)
     if (HAL_GetTick() - lastBlinkTime >= 500) 
     {
         lastBlinkTime = HAL_GetTick();
@@ -147,31 +151,26 @@ int main(void)
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, dimmedLevel);
         }
     }
+  	    // Check K0: Increase Duty
+    uint8_t k0_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4);
+    if (k0_current == 0 && k0_last_state == 1) {
+        if (duty_cycle <= 950) duty_cycle += 50; 
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle);
+        printf("Duty Increased: %lu\r\n", duty_cycle);
+        HAL_Delay(50); // Debounce
+    }
+    k0_last_state = k0_current;
 
-    // 2. BUTTON LOGIC (Always responsive!)
-  
-    // Check K0
-		uint8_t k0_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4); // Adjust port/pin for K0
-		if (k0_current == 0 && k0_last_state == 1) {
-
-        dimmedLevel = 20; // Brighter blink
-        printf("K0 Pressed: Brightness set to HIGH (20%%)\r\n");
-        
-    		HAL_Delay(50); //Simple debounce 
-		}
-		k0_last_state = k0_current;
-
-		// Check K1
-		uint8_t k1_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3); // Adjust port/pin for K1
-		if (k1_current == 0 && k1_last_state == 1) {
-			
-		    dimmedLevel = 5; // Dimmer blink
-        printf("K1 Pressed: Brightness set to HIGH (5%%)\r\n");
-		    
-		    HAL_Delay(50); // Simple debounce
-		}
-		k1_last_state = k1_current;
-
+    // Check K1: Decrease Duty
+    uint8_t k1_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3);
+    if (k1_current == 0 && k1_last_state == 1) {
+        if (duty_cycle >= 50) duty_cycle -= 50; 
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle);
+        printf("Duty Decreased: %lu\r\n", duty_cycle);
+        HAL_Delay(50); // Debounce
+    }
+    k1_last_state = k1_current;
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
