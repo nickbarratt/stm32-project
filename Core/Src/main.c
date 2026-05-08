@@ -117,10 +117,9 @@ int main(void)
 	
 	// Enable Clock for Port A
   __HAL_RCC_GPIOA_CLK_ENABLE();
-
   uint32_t lastBlinkTime = 0;
   uint8_t ledIsOn = 0;
-  uint16_t dimmedLevel = 10; // Set your desired dimness here
+  uint16_t dimmedLevel = 500; // Set your desired dimness here
 
 
 // Clear the terminal screen and reset cursor (ANSI escape codes)
@@ -144,18 +143,20 @@ int main(void)
         ledIsOn = !ledIsOn; // Flip the state
 
         if (ledIsOn) {
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, dimmedLevel);
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
         } else {
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, dimmedLevel);
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, duty_cycle);
         }
     }
-  	    // Check K0: Increase Duty
+  	
+  	// Check K0: Increase Duty
     uint8_t k0_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4);
     if (k0_current == 0 && k0_last_state == 1) {
         if (duty_cycle <= 950) duty_cycle += 50; 
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle);
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle); // updates PE9
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle); // Updates Onboard LED
         printf("Duty Increased: %lu\r\n", duty_cycle);
         HAL_Delay(50); // Debounce
     }
@@ -165,7 +166,8 @@ int main(void)
     uint8_t k1_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3);
     if (k1_current == 0 && k1_last_state == 1) {
         if (duty_cycle >= 50) duty_cycle -= 50; 
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle);
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle); // updates PE9
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle); // Updates Onboard LED        
         printf("Duty Decreased: %lu\r\n", duty_cycle);
         HAL_Delay(50); // Debounce
     }
