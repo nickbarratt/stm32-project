@@ -46,6 +46,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+uint8_t k0_last_state = 1; // Assuming pull-up (1 = released)
+uint8_t k1_last_state = 1;
 
 /* USER CODE END PV */
 
@@ -129,11 +131,8 @@ int main(void)
   while (1)
   {
   	
-  	//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, brightness);
-		//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, brightness); 
-		
-		
-		    // 1. BLINK LOGIC (Non-blocking)
+	
+		// 1. BLINK LOGIC (Non-blocking)
     if (HAL_GetTick() - lastBlinkTime >= 500) 
     {
         lastBlinkTime = HAL_GetTick();
@@ -149,15 +148,38 @@ int main(void)
     }
 
     // 2. BUTTON LOGIC (Always responsive!)
-    if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4) == GPIO_PIN_RESET) {
+ //   if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4) == GPIO_PIN_RESET) {
+ //       dimmedLevel = 20; // Brighter blink
+ //       printf("K0 Pressed: Brightness set to HIGH (20%%)\r\n");
+ //   }
+ //   if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
+ //       dimmedLevel = 2;  // Very dim blink
+ //       printf("K1 Pressed: Brightness set to LOW (5%%)\r\n");
+ //   }
+    
+    
+    // Check K0
+		uint8_t k0_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4); // Adjust port/pin for K0
+		if (k0_current == 0 && k0_last_state == 1) {
+
         dimmedLevel = 20; // Brighter blink
         printf("K0 Pressed: Brightness set to HIGH (20%%)\r\n");
-    }
-    if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
-        dimmedLevel = 2;  // Very dim blink
-        printf("K1 Pressed: Brightness set to LOW (5%%)\r\n");
-    }
-    
+        
+    		HAL_Delay(50); //Simple debounce 
+		}
+		k0_last_state = k0_current;
+
+		// Check K1
+		uint8_t k1_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3); // Adjust port/pin for K1
+		if (k1_current == 0 && k1_last_state == 1) {
+			
+		    dimmedLevel = 5; // Dimmer blink
+        printf("K1 Pressed: Brightness set to HIGH (5%%)\r\n");
+		    
+		    HAL_Delay(50); // Simple debounce
+		}
+		k1_last_state = k1_current;
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
