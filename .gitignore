@@ -1,0 +1,31 @@
+# --- STM32CubeIDE Build Artifacts ---
+Debug/
+Release/
+bin/
+obj/
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.d
+*.su
+*.cyclomatic
+
+# --- Local IDE/User Settings ---
+.settings/
+.launches/
+*.launch
+.gdbinit
+.project.bak
+.cproject.bak
+
+# --- CubeMX Generated (if you want to exclude backup files) ---
+*.ioc.bak
+mxproject.bak
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+
