@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -51,11 +52,16 @@ uint8_t k1_last_state = 1;
 
 uint32_t duty_cycle = 500;
 
+uint32_t lastBlinkTime = 0;
+uint8_t  ledIsOn = 0;
+
+
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -117,9 +123,8 @@ int main(void)
 	
 	// Enable Clock for Port A
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  uint32_t lastBlinkTime = 0;
-  uint8_t ledIsOn = 0;
-  uint16_t dimmedLevel = 500; // Set your desired dimness here
+
+  //uint16_t dimmedLevel = 500; // Set your desired dimness here
 
 
 // Clear the terminal screen and reset cursor (ANSI escape codes)
@@ -131,48 +136,21 @@ int main(void)
 
   /* USER CODE END 2 */
 
+  /* Init scheduler */
+  osKernelInitialize();  /* Call init function for freertos objects (in cmsis_os2.c) */
+  MX_FREERTOS_Init();
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
   	
-  	// 1. BLINK LOGIC (Non-blocking)
-    if (HAL_GetTick() - lastBlinkTime >= 500) 
-    {
-        lastBlinkTime = HAL_GetTick();
-        ledIsOn = !ledIsOn; // Flip the state
-
-        if (ledIsOn) {
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-        } else {
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, duty_cycle);
-        }
-    }
-  	
-  	// Check K0: Increase Duty
-    uint8_t k0_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4);
-    if (k0_current == 0 && k0_last_state == 1) {
-        if (duty_cycle <= 950) duty_cycle += 50; 
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle); // updates PE9
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle); // Updates Onboard LED
-        printf("Duty Increased: %lu\r\n", duty_cycle);
-        HAL_Delay(50); // Debounce
-    }
-    k0_last_state = k0_current;
-
-    // Check K1: Decrease Duty
-    uint8_t k1_current = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3);
-    if (k1_current == 0 && k1_last_state == 1) {
-        if (duty_cycle >= 50) duty_cycle -= 50; 
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, duty_cycle); // updates PE9
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle); // Updates Onboard LED        
-        printf("Duty Decreased: %lu\r\n", duty_cycle);
-        HAL_Delay(50); // Debounce
-    }
-    k1_last_state = k1_current;
-    
+ 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -224,6 +202,28 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM6 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM6)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
