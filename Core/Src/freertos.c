@@ -60,7 +60,10 @@ extern uint8_t  k1_last_state;
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-
+extern SPI_HandleTypeDef hspi2;
+#define RF95_REG_FIFO 0x00
+#define RF95_REG_OP_MODE 0x01
+#define RF95_MODE_TX 0x03
 /* USER CODE END Variables */
 /* Definitions for MainLogicTask */
 osThreadId_t MainLogicTaskHandle;
@@ -76,6 +79,13 @@ const osThreadAttr_t SerialTask_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for LoRaTask */
+osThreadId_t LoRaTaskHandle;
+const osThreadAttr_t LoRaTask_attributes = {
+  .name = "LoRaTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -84,6 +94,7 @@ const osThreadAttr_t SerialTask_attributes = {
 
 void StartMainLogicTask(void *argument);
 void StartSerialTask(void *argument);
+void StartLoRaTask(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -131,6 +142,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of SerialTask */
   SerialTaskHandle = osThreadNew(StartSerialTask, NULL, &SerialTask_attributes);
+
+  /* creation of LoRaTask */
+  LoRaTaskHandle = osThreadNew(StartLoRaTask, NULL, &LoRaTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -218,8 +232,38 @@ void StartSerialTask(void *argument)
   /* USER CODE END StartSerialTask */
 }
 
+/* USER CODE BEGIN Header_StartLoRaTask */
+/**
+* @brief Function implementing the LoRaTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartLoRaTask */
+void StartLoRaTask(void *argument)
+{
+  /* USER CODE BEGIN StartLoRaTask */
+  
+    // 1. Reset Radio
+  HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_RESET);
+  osDelay(10);
+  HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_SET);
+  
+  /* Infinite loop */
+  for(;;)
+  {
+  	// Range Test Ping logic will go here tomorrow
+    osDelay(5000);
+  }
+  /* USER CODE END StartLoRaTask */
+}
+
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-
+void Lora_WriteReg(uint8_t addr, uint8_t val) {
+    uint8_t data[2] = { (uint8_t)(addr | 0x80), val }; // Cast and format for SPI
+    HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_Transmit(&hspi2, data, 2, 100);
+    HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_SET);
+}
 /* USER CODE END Application */
 
