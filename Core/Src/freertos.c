@@ -89,7 +89,8 @@ const osThreadAttr_t LoRaTask_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
+void Lora_WriteReg(uint8_t addr, uint8_t val);
+uint8_t Lora_ReadReg(uint8_t addr);
 /* USER CODE END FunctionPrototypes */
 
 void StartMainLogicTask(void *argument);
@@ -243,27 +244,50 @@ void StartLoRaTask(void *argument)
 {
   /* USER CODE BEGIN StartLoRaTask */
   
-    // 1. Reset Radio
+  /* 1. Hardware Reset */
   HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_RESET);
   osDelay(10);
   HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_SET);
-  
-  /* Infinite loop */
-  for(;;)
-  {
-  	// Range Test Ping logic will go here tomorrow
-    osDelay(5000);
+  osDelay(10);
+
+  /* 2. SPI Communication Test */
+  // Register 0x42 is RegVersion. On RFM95W/SX1276, it always returns 0x12.
+  uint8_t version = Lora_ReadReg(0x42);
+
+  for(;;) {
+    if (version == 0x12) {
+        printf("LoRa SPI OK! Version: 0x%02X\r\n", version);
+    } else {
+        printf("LoRa SPI ERROR! Read: 0x%02X (Expected 0x12)\r\n", version);
+    }
+    
+    osDelay(2000); // Check every 2 seconds
   }
+  
   /* USER CODE END StartLoRaTask */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+
+// Write to a register
 void Lora_WriteReg(uint8_t addr, uint8_t val) {
     uint8_t data[2] = { (uint8_t)(addr | 0x80), val }; // Cast and format for SPI
     HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_RESET);
     HAL_SPI_Transmit(&hspi2, data, 2, 100);
     HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_SET);
 }
+
+// Read from a register
+uint8_t Lora_ReadReg(uint8_t addr) {
+    uint8_t addr_byte = addr & 0x7F; // MSB low for Read
+    uint8_t val = 0;
+    HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_Transmit(&hspi2, &addr_byte, 1, 100);
+    HAL_SPI_Receive(&hspi2, &val, 1, 100);
+    HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_SET);
+    return val;
+}
+
 /* USER CODE END Application */
 
