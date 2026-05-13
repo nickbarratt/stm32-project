@@ -64,6 +64,26 @@ extern SPI_HandleTypeDef hspi2;
 #define RF95_REG_FIFO 0x00
 #define RF95_REG_OP_MODE 0x01
 #define RF95_MODE_TX 0x03
+
+#define REG_FIFO                 0x00
+#define REG_OP_MODE              0x01
+#define REG_FRF_MSB              0x06
+#define REG_FRF_MID              0x07
+#define REG_FRF_LSB              0x08
+#define REG_PA_CONFIG            0x09
+#define REG_FIFO_ADDR_PTR        0x0D
+#define REG_FIFO_TX_BASE_ADDR    0x0E
+#define REG_MODEM_CONFIG_1       0x1D
+#define REG_MODEM_CONFIG_2       0x1E
+#define REG_PAYLOAD_LENGTH       0x22
+#define REG_DIO_MAPPING_1        0x40
+
+// Mode bits
+#define MODE_LONG_RANGE_MODE     0x80
+#define MODE_SLEEP               0x00
+#define MODE_STDBY               0x01
+#define MODE_TX                  0x03
+
 /* USER CODE END Variables */
 /* Definitions for MainLogicTask */
 osThreadId_t MainLogicTaskHandle;
@@ -253,15 +273,66 @@ void StartLoRaTask(void *argument)
   /* 2. SPI Communication Test */
   // Register 0x42 is RegVersion. On RFM95W/SX1276, it always returns 0x12.
   uint8_t version = Lora_ReadReg(0x42);
+  
+  // Use version to protect the system
+  if (version != 0x12) {
+      HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] ERROR: Radio core not found!\r\n", 37, 100);
+      for(;;) { osDelay(1000); } // Loop forever here and protect the radio
+  }
+  
+  // 1. Put radio in Sleep mode to allow changing to LoRa mode
+	Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
+	osDelay(10);
+	
+	// 2. Set Frequency to 868.1 MHz (Formula: F_RF / (32MHz / 2^19))
+	// 868100000 / 61.03515625 = 14223122 = 0xD91E12
+	Lora_WriteReg(REG_FRF_MSB, 0xD9);
+	Lora_WriteReg(REG_FRF_MID, 0x1E);
+	Lora_WriteReg(REG_FRF_LSB, 0x12);
+	
+	// 3. Configure Base FIFO addresses
+	Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
+	Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
+	
+	// 4. Configure Modem for Standard LoRaWAN settings (SF7, 125kHz Bandwidth)
+	// RegModemConfig1: BW=125kHz (0x70), Coding Rate=4/5 (0x02), Explicit Header (0x00)
+	Lora_WriteReg(REG_MODEM_CONFIG_1, 0x72);
+	// RegModemConfig2: Spreading Factor 7 (0x70), CRC On (0x04)
+	Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74);
+	
+	// 5. Power Configuration (Max output power for legal UK unlicensed band)
+	// PA_BOOST pin enabled (0x80) + Max power output setting
+	Lora_WriteReg(REG_PA_CONFIG, 0x8F); 
+	
+	// 6. Map DIO0 to trigger on TXDone (Transmission Complete)
+	// This will physically pull your PE0 (or interrupt pin) High when finished transmitting
+	Lora_WriteReg(REG_DIO_MAPPING_1, 0x40);
+	
+	// 7. Bring radio into Standby mode to ready the synthesiser
+	Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_STDBY);
+	osDelay(10);
 
-  for(;;) {
-    if (version == 0x12) {
-        printf("LoRa SPI OK! Version: 0x%02X\r\n", version);
-    } else {
-        printf("LoRa SPI ERROR! Read: 0x%02X (Expected 0x12)\r\n", version);
+
+  for(;;) 
+  {
+    // ==========================================
+    // TRANSMIT LOOP
+    // ==========================================
+    char payload[] = "HELLO_UK_GATEWAY";
+    uint8_t payload_len = strlen(payload);
+
+    Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
+    Lora_WriteReg(REG_PAYLOAD_LENGTH, payload_len);
+
+    for(uint8_t i = 0; i < payload_len; i++) {
+        Lora_WriteReg(REG_FIFO, payload[i]);
     }
-    
-    osDelay(2000); // Check every 2 seconds
+
+    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Broadcasting Ping...\r\n", 28, 100);
+    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+
+    osDelay(10000); // Wait 10 seconds between pings
+    // ==========================================
   }
   
   /* USER CODE END StartLoRaTask */
