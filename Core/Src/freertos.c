@@ -294,11 +294,11 @@ void StartLoRaTask(void *argument)
 	Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
 	Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
 	
-	// 4. Configure Modem for Standard LoRaWAN settings (SF7, 125kHz Bandwidth)
+	// 4. Configure Modem for Standard LoRaWAN settings (SF12, 125kHz Bandwidth)
 	// RegModemConfig1: BW=125kHz (0x70), Coding Rate=4/5 (0x02), Explicit Header (0x00)
 	Lora_WriteReg(REG_MODEM_CONFIG_1, 0x72);
-	// RegModemConfig2: Spreading Factor 7 (0x70), CRC On (0x04)
-	Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74);
+	// RegModemConfig2: Spreading Factor 12 (0xC0), CRC On (0x04)
+	Lora_WriteReg(REG_MODEM_CONFIG_2, 0xC4);
 	
 	// 5. Power Configuration (Max output power for legal UK unlicensed band)
 	// PA_BOOST pin enabled (0x80) + Max power output setting
@@ -358,6 +358,20 @@ uint8_t Lora_ReadReg(uint8_t addr) {
     HAL_SPI_Receive(&hspi2, &val, 1, 100);
     HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_SET);
     return val;
+}
+
+// This function automatically fires the exact millisecond a packet leaves the antenna
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == LORA_DIO0_Pin) // Check if the interrupt came from PE0
+  {
+    // Clear the radio's internal IRQ flags so it can transmit again next time
+    // Register 0x12 is RegIrqFlags. Writing 0x08 clears the TxDone flag.
+    Lora_WriteReg(0x12, 0x08);
+    
+    // Print immediate confirmation to your serial monitor
+    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> TXDone Interrupt Received! Packet is in the air.\r\n", 60, 10);
+  }
 }
 
 /* USER CODE END Application */
