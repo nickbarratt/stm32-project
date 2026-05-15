@@ -56,9 +56,38 @@ uint32_t duty_cycle = 500;
 uint32_t lastBlinkTime = 0;
 uint8_t  ledIsOn = 0;
 
+#include "lmic.h"
+#include "hal.h"
 
+// Note: string.h is already included above in the file
 
+osjob_t txJob;
+
+// 1. Little-Endian Join / Art EUI Array Configuration
+void os_getArtEui (u1_t* buf) {
+    // Added brackets [] to turn JOIN_EUI into a proper array
+    static const u1_t ART_EUI[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    memcpy(buf, ART_EUI, 8);
+}
+
+// 2. Little-Endian Device EUI Array Configuration
+void os_getDevEui (u1_t* buf) {
+    // Added brackets [] to turn DEV_EUI into a proper array
+    static const u1_t DEV_EUI[]  = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
+    memcpy(buf, DEV_EUI, 8);
+}
+
+// 3. Big-Endian Application Key Array Configuration
+void os_getDevKey (u1_t* buf) {
+    // Added brackets [] to turn APP_KEY into a proper array
+    static const u1_t APP_KEY[] = { 
+        0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11, 
+        0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 
+    };
+    memcpy(buf, APP_KEY, 16);
+}
 /* USER CODE END PV */
+
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -80,6 +109,30 @@ PUTCHAR_PROTOTYPE
 {
   HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
   return ch;
+}
+
+void do_send(osjob_t* j) {
+    if (LMIC.opmode & OP_TXRXPEND) {
+        // Line busy; retry sequence runs automatically
+    } else {
+        static uint8_t myData[] = { 0x41, 0x42 }; // Transmits hex string "AB"
+        LMIC_setTxData2(1, myData, sizeof(myData), 0);
+    }
+}
+
+void onEvent (ev_t ev) {
+    switch(ev) {
+        case EV_JOINING:
+            break;
+        case EV_JOINED:
+            LMIC_setLinkCheckMode(0); // Secure link verified
+            break;
+        case EV_TXCOMPLETE:
+            os_setTimedCallback(&txJob, os_getTime() + sec2osticks(60), do_send);
+            break;
+        default:
+            break;
+    }
 }
 /* USER CODE END 0 */
 

@@ -25,7 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "main.h"  // Ensures types like UART_HandleTypeDef are known
+#include "lmic.h"  // 
 #include <string.h> // For strlen() if you're using it in serial tasks
 
 #include <stdio.h>  // Fixes the printf error
@@ -260,82 +260,35 @@ void StartSerialTask(void *argument)
 * @retval None
 */
 /* USER CODE END Header_StartLoRaTask */
+
 void StartLoRaTask(void *argument)
 {
-  /* USER CODE BEGIN StartLoRaTask */
-  
-  /* 1. Hardware Reset */
-  HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_RESET);
-  osDelay(10);
-  HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_SET);
-  osDelay(10);
+  /* USER CODE BEGIN StartLoraTask */
+  // Expose the global functions and tracking variables instantiated in main.c
+  extern void os_init(void);
+  extern void LMIC_reset(void);
+  extern void do_send(void* job);
+  extern osjob_t txJob;
 
-  /* 2. SPI Communication Test */
-  // Register 0x42 is RegVersion. On RFM95W/SX1276, it always returns 0x12.
-  uint8_t version = Lora_ReadReg(0x42);
-  
-  // Use version to protect the system
-  if (version != 0x12) {
-      HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] ERROR: Radio core not found!\r\n", 37, 100);
-      for(;;) { osDelay(1000); } // Loop forever here and protect the radio
-  }
-  
-  // 1. Put radio in Sleep mode to allow changing to LoRa mode
-	Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
-	osDelay(10);
-	
-	// 2. Set Frequency to 868.1 MHz (Formula: F_RF / (32MHz / 2^19))
-	// 868100000 / 61.03515625 = 14223122 = 0xD91E12
-	Lora_WriteReg(REG_FRF_MSB, 0xD9);
-	Lora_WriteReg(REG_FRF_MID, 0x1E);
-	Lora_WriteReg(REG_FRF_LSB, 0x12);
-	
-	// 3. Configure Base FIFO addresses
-	Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
-	Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-	
-	// 4. Configure Modem for Standard LoRaWAN settings (SF12, 125kHz Bandwidth)
-	// RegModemConfig1: BW=125kHz (0x70), Coding Rate=4/5 (0x02), Explicit Header (0x00)
-	Lora_WriteReg(REG_MODEM_CONFIG_1, 0x72);
-	// RegModemConfig2: Spreading Factor 12 (0xC0), CRC On (0x04)
-	Lora_WriteReg(REG_MODEM_CONFIG_2, 0xC4);
-	
-	// 5. Power Configuration (Max output power for legal UK unlicensed band)
-	// PA_BOOST pin enabled (0x80) + Max power output setting
-	Lora_WriteReg(REG_PA_CONFIG, 0x8F); 
-	
-	// 6. Map DIO0 to trigger on TXDone (Transmission Complete)
-	// This will physically pull your PE0 (or interrupt pin) High when finished transmitting
-	Lora_WriteReg(REG_DIO_MAPPING_1, 0x40);
-	
-	// 7. Bring radio into Standby mode to ready the synthesiser
-	Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_STDBY);
-	osDelay(10);
+  // 1. Initialize the internal LMIC clock and scheduler metrics
+  os_init();    
+    
+  // 2. Clear out tracking parameters and prep the SX1276 chip registers
+  LMIC_reset(); 
+    
+  // 3. Queue up the initial network handshake join sequence pass
+  do_send(&txJob);
 
-
-  for(;;) 
+  /* Infinite processing loop executed concurrently by FreeRTOS */
+  for(;;)
   {
-    // ==========================================
-    // TRANSMIT LOOP
-    // ==========================================
-    char payload[] = "HELLO_UK_GATEWAY";
-    uint8_t payload_len = strlen(payload);
-
-    Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-    Lora_WriteReg(REG_PAYLOAD_LENGTH, payload_len);
-
-    for(uint8_t i = 0; i < payload_len; i++) {
-        Lora_WriteReg(REG_FIFO, payload[i]);
-    }
-
-    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Broadcasting Ping...\r\n", 28, 100);
-    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
-
-    osDelay(10000); // Wait 10 seconds between pings
-    // ==========================================
+    // Continuously advance the LoRaWAN execution engine state machine
+    os_runloop_once(); 
+        
+    // Yield 2 milliseconds to protect your other task (StartSerialTask) from starving
+    osDelay(2);        
   }
-  
-  /* USER CODE END StartLoRaTask */
+  /* USER CODE END StartLoraTask */
 }
 
 /* Private application code --------------------------------------------------*/
