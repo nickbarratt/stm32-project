@@ -330,6 +330,21 @@ void StartLoRaTask(void *argument)
 
     HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Broadcasting Ping...\r\n", 28, 100);
     Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+    
+        // Fire transmitter
+ //   Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+    
+    // =======================================================================
+    //  SPI VERIFICATION DEBUG BLOCK
+    // =======================================================================
+    osDelay(2); // Give the internal PLL a brief moment to lock states
+    uint8_t current_mode = Lora_ReadReg(REG_OP_MODE);
+    
+    if ((current_mode & 0x07) != MODE_TX) {
+        HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] ERROR: Chip failed to enter TX mode!\r\n", 45, 100);
+    } else {
+        HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Radio switched to TX successfully.\r\n", 42, 100);
+    }
 
     osDelay(10000); // Wait 10 seconds between pings
     // ==========================================
