@@ -25,10 +25,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "lmic.h"  // 
+#include "main.h"  // Ensures types like UART_HandleTypeDef are known
 #include <string.h> // For strlen() if you're using it in serial tasks
-
 #include <stdio.h>  // Fixes the printf error
+#include "lmic.h"
+#include "hal.h"
+
 
 // Link hardware handles from main.c
 extern TIM_HandleTypeDef htim1;  
@@ -111,6 +113,7 @@ const osThreadAttr_t LoRaTask_attributes = {
 /* USER CODE BEGIN FunctionPrototypes */
 void Lora_WriteReg(uint8_t addr, uint8_t val);
 uint8_t Lora_ReadReg(uint8_t addr);
+extern void radio_irq_handler(u1_t dio);
 /* USER CODE END FunctionPrototypes */
 
 void StartMainLogicTask(void *argument);
@@ -253,43 +256,36 @@ void StartSerialTask(void *argument)
   /* USER CODE END StartSerialTask */
 }
 
-/* USER CODE BEGIN Header_StartLoRaTask */
+/* USER CODE BEGIN Header_StartLoraTask */
 /**
-* @brief Function implementing the LoRaTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartLoRaTask */
-
-void StartLoRaTask(void *argument)
+  * @brief Function implementing the loraTask thread.
+  * @param argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartLoraTask */
+// Change "StartLoraTask" to "StartLoRaTask" (Capital O and Capital R)
+void StartLoRaTask(void *argument) 
 {
-  /* USER CODE BEGIN StartLoraTask */
-  // Expose the global functions and tracking variables instantiated in main.c
-  extern void os_init(void);
-  extern void LMIC_reset(void);
-  extern void do_send(void* job);
-  extern osjob_t txJob;
+  /* USER CODE BEGIN StartLoRaTask */
+  
+  LMIC_startJoining();
+  LMIC_setDrTxpow(DR_SF7, 14);
+  LMIC_setAdrMode(0);
 
-  // 1. Initialize the internal LMIC clock and scheduler metrics
-  os_init();    
-    
-  // 2. Clear out tracking parameters and prep the SX1276 chip registers
-  LMIC_reset(); 
-    
-  // 3. Queue up the initial network handshake join sequence pass
-  do_send(&txJob);
-
-  /* Infinite processing loop executed concurrently by FreeRTOS */
+  /* Infinite loop */
   for(;;)
   {
-    // Continuously advance the LoRaWAN execution engine state machine
-    os_runloop_once(); 
-        
-    // Yield 2 milliseconds to protect your other task (StartSerialTask) from starving
-    osDelay(2);        
+    extern void lmic_hal_processPendingIRQs(void);
+    lmic_hal_processPendingIRQs();
+
+    os_runloop_once();
+
+    osDelay(2); 
   }
-  /* USER CODE END StartLoraTask */
+  /* USER CODE END StartLoRaTask */
 }
+
+
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
@@ -313,18 +309,66 @@ uint8_t Lora_ReadReg(uint8_t addr) {
     return val;
 }
 
-// This function automatically fires the exact millisecond a packet leaves the antenna
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  if (GPIO_Pin == LORA_DIO0_Pin) // Check if the interrupt came from PE0
-  {
-    // Clear the radio's internal IRQ flags so it can transmit again next time
-    // Register 0x12 is RegIrqFlags. Writing 0x08 clears the TxDone flag.
-    Lora_WriteReg(0x12, 0x08);
     
-    // Print immediate confirmation to your serial monitor
-    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> TXDone Interrupt Received! Packet is in the air.\r\n", 60, 10);
-  }
+}
+
+
+void onEvent (ev_t ev) {
+    switch(ev) {
+        case EV_SCAN_TIMEOUT:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Scan Timeout\r\n", 27, 100);
+            break;
+        case EV_BEACON_FOUND:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Beacon Found\r\n", 27, 100);
+            break;
+        case EV_BEACON_MISSED:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Beacon Missed\r\n", 28, 100);
+            break;
+        case EV_BEACON_TRACKED:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Beacon Tracked\r\n", 29, 100);
+            break;
+        case EV_JOINING:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Event 17: EV_JOINING (Looking for gateway...)\r\n", 60, 100);
+            break;
+        case EV_JOINED:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] EV_JOINED (Connected to network!)\r\n", 48, 100);
+            break;
+        case EV_JOIN_FAILED:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Join Failed\r\n", 26, 100);
+            break;
+        case EV_REJOIN_FAILED:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Rejoin Failed\r\n", 28, 100);
+            break;
+        case EV_TXCOMPLETE:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Transmission Complete (RX Windows Open)\r\n", 54, 100);
+            break;
+        case EV_RESET:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Radio Reset\r\n", 26, 100);
+            break;
+        case EV_LINK_DEAD:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Link Dead\r\n", 24, 100);
+            break;
+        case EV_LINK_ALIVE:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Link Alive\r\n", 25, 100);
+            break;
+        case EV_TXSTART:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Event 20: EV_TXSTART (Uplink/Join Frame Airbound)\r\n", 64, 100);
+            break;
+        case EV_RXSTART:
+            HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] EV_RXSTART (Downlink Window Active)\r\n", 50, 100);
+            break;
+
+        default:
+            // FIXED: Cleaned up code to explicitly print any unknown codes safely
+            {
+                char log_buffer[50];
+                int len = snprintf(log_buffer, sizeof(log_buffer), "[LMIC Event] Unmapped Code: %d\r\n", (int)ev);
+                HAL_UART_Transmit(&huart1, (uint8_t*)log_buffer, len, 100);
+            }
+            break;
+    }
 }
 
 /* USER CODE END Application */

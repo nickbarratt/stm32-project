@@ -26,8 +26,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>   // Required for printf
-#include <string.h>  // Required for string operations
+#include <stdio.h>
+#include <stdint.h>
+#include "lmic.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,46 +50,30 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint8_t k0_last_state = 1; // Assuming pull-up (1 = released)
-uint8_t k1_last_state = 1;
-
-uint32_t duty_cycle = 500;
-
-uint32_t lastBlinkTime = 0;
-uint8_t  ledIsOn = 0;
-
-#include "lmic.h"
-#include "hal.h"
-
-// Note: string.h is already included above in the file
-
-osjob_t txJob;
-
-// 1. Little-Endian Join / Art EUI Array Configuration
+// 1. Paste your Join EUI from the console in LSB format
 void os_getArtEui (u1_t* buf) {
-    // Added brackets [] to turn JOIN_EUI into a proper array
     static const u1_t ART_EUI[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
     memcpy(buf, ART_EUI, 8);
 }
 
-// 2. Little-Endian Device EUI Array Configuration
+// 2. Paste your Device EUI from the console in LSB format
 void os_getDevEui (u1_t* buf) {
-    // Added brackets [] to turn DEV_EUI into a proper array
-    static const u1_t DEV_EUI[]  = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
+    static const u1_t DEV_EUI[] = { 0x56, 0x78, 0x07, 0xD0, 0x7E, 0xD5, 0xB3, 0x70 };
     memcpy(buf, DEV_EUI, 8);
 }
 
-// 3. Big-Endian Application Key Array Configuration
+// FIXED: Adjusted name back to os_getDevKey to perfectly align with your LMIC library version
 void os_getDevKey (u1_t* buf) {
-    // Added brackets [] to turn APP_KEY into a proper array
     static const u1_t APP_KEY[] = { 
-        0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11, 
-        0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 
+        0xB7, 0x20, 0xA6, 0xAF, 0x19, 0x82, 0x72, 0x45, 
+        0xF0, 0xA6, 0x05, 0x80, 0xC8, 0xB0, 0x9E, 0x36
     };
     memcpy(buf, APP_KEY, 16);
 }
-/* USER CODE END PV */
 
+// Stub function for older library variants that may explicitly require it compiled
+void os_getDeveloperKey (u1_t* buf) { os_getDevKey(buf); }
+/* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -98,42 +84,12 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-#ifdef __GNUC__
-#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#else
-#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
-#endif
-
-PUTCHAR_PROTOTYPE
-{
-  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
-  return ch;
-}
-
-void do_send(osjob_t* j) {
-    if (LMIC.opmode & OP_TXRXPEND) {
-        // Line busy; retry sequence runs automatically
-    } else {
-        static uint8_t myData[] = { 0x41, 0x42 }; // Transmits hex string "AB"
-        LMIC_setTxData2(1, myData, sizeof(myData), 0);
-    }
-}
-
-void onEvent (ev_t ev) {
-    switch(ev) {
-        case EV_JOINING:
-            break;
-        case EV_JOINED:
-            LMIC_setLinkCheckMode(0); // Secure link verified
-            break;
-        case EV_TXCOMPLETE:
-            os_setTimedCallback(&txJob, os_getTime() + sec2osticks(60), do_send);
-            break;
-        default:
-            break;
-    }
-}
+// RESTORED: Main application variables required by StartMainLogicTask
+uint32_t lastBlinkTime = 0;
+uint8_t ledIsOn = 0;
+uint32_t duty_cycle = 0;
+uint8_t k0_last_state = 1;
+uint8_t k1_last_state = 1;
 /* USER CODE END 0 */
 
 /**
@@ -178,10 +134,30 @@ int main(void)
 	
 	// Enable Clock for Port A
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  
+// 1. First, tell the library to execute the Join sequence setup
+LMIC_startJoining();
+
+// 2. FORCE data rate down to SF7 right after startJoining is called
+// This overrides the default MCCI initialization behavior
+LMIC_setDrTxpow(DR_SF7, 14);
+
+// 3. Disable ADR (Adaptive Data Rate) so the network doesn't override your choice
+LMIC_setAdrMode(0);
+
+// 4. OPTIONAL: If you are in the US (US915), force sub-band 2 (channels 8-15) for TTN
+// (Uncomment this line if you are deploying inside North America)
+// LMIC_selectSubBand(1); 
+
+
 
   //uint16_t dimmedLevel = 500; // Set your desired dimness here
 
-
+ 
+  // Execute the raw hardware diagnostic test immediately on bootup
+  // run_radio_spi_diagnostic();
+ 
+  
 // Clear the terminal screen and reset cursor (ANSI escape codes)
 	printf("\033[2J\033[H"); 
 	printf("=================================\r\n");
