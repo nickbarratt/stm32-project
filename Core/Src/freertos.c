@@ -63,6 +63,10 @@ extern uint8_t  k1_last_state;
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
 extern SPI_HandleTypeDef hspi2;
+volatile uint32_t dio0_counter = 0;
+volatile uint8_t lora_event_flag = 0;
+volatile uint8_t dio0_fired = 0;
+volatile uint8_t dio1_fired = 0;
 #define RF95_REG_FIFO 0x00
 #define RF95_REG_OP_MODE 0x01
 #define RF95_MODE_TX 0x03
@@ -91,21 +95,21 @@ extern SPI_HandleTypeDef hspi2;
 osThreadId_t MainLogicTaskHandle;
 const osThreadAttr_t MainLogicTask_attributes = {
   .name = "MainLogicTask",
-  .stack_size = 256 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for SerialTask */
 osThreadId_t SerialTaskHandle;
 const osThreadAttr_t SerialTask_attributes = {
   .name = "SerialTask",
-  .stack_size = 256 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* Definitions for LoRaTask */
 osThreadId_t LoRaTaskHandle;
 const osThreadAttr_t LoRaTask_attributes = {
   .name = "LoRaTask",
-  .stack_size = 512 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
 
@@ -249,43 +253,94 @@ void StartSerialTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    char msg[] = "RTOS Heartbeat: System Stable\r\n";
-    HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);
-    osDelay(2000); // Send a message every 2 seconds
+  char msg[] = "RTOS Heartbeat: System Stable\r\n";
+  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);
+
+  // ====================================================================
+  //  RAW SPI ISOLATION TEST
+  // ====================================================================
+  uint8_t version_reg_address = 0x42 & 0x7F; // 0x42 with Read flag (MSB 0)
+  uint8_t silicon_version_id = 0;
+  
+  // Explicitly drop NSS low, perform a 2-byte transaction, and pull high
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET); 
+  HAL_SPI_Transmit(&hspi2, &version_reg_address, 1, 10); 
+  HAL_SPI_Receive(&hspi2, &silicon_version_id, 1, 10);   
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_SET);   
+  
+  // Output the raw data via your working UART driver
+//  char spi_msg[64];
+//  sprintf(spi_msg, "--> REALITY CHECK: Register 0x42 reads: 0x%02X\r\n", silicon_version_id);
+//  HAL_UART_Transmit(&huart1, (uint8_t*)spi_msg, strlen(spi_msg), 100);
+  // ====================================================================
+
+
+    osDelay(2000);
   }
   /* USER CODE END StartSerialTask */
 }
 
-/* USER CODE BEGIN Header_StartLoraTask */
+/* USER CODE BEGIN Header_StartLoRaTask */
 /**
-  * @brief Function implementing the loraTask thread.
-  * @param argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartLoraTask */
-// Change "StartLoraTask" to "StartLoRaTask" (Capital O and Capital R)
-void StartLoRaTask(void *argument) 
+* @brief Function implementing the LoRaTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartLoRaTask */
+void StartLoRaTask(void *argument)
 {
   /* USER CODE BEGIN StartLoRaTask */
   
-  LMIC_startJoining();
+  // 1. Core Initialization
+  os_init();
+  LMIC_reset();
+
+  // 2. Relax timing windows by 15% for your STM32 clock speed
+  LMIC_setClockError(MAX_CLOCK_ERROR * 15 / 100); 
+
+  //  3. FORCE PUBLIC NETWORK MODE (CRUCIAL FOR TTN UK GATEWAYS)
+  // This explicitly overrides any private settings and sets the radio to 0x34
+  //LMIC_selectSubBand(0); 
+  
+  // 4. Initiate Handshake Protocol Configurations
   LMIC_setDrTxpow(DR_SF7, 14);
   LMIC_setAdrMode(0);
+  LMIC_startJoining();
 
   /* Infinite loop */
   for(;;)
   {
-    extern void lmic_hal_processPendingIRQs(void);
-    lmic_hal_processPendingIRQs();
+  //  extern void lmic_hal_processPendingIRQs(void);
+  //  lmic_hal_processPendingIRQs();
+    
+    /* Check if the interrupt flag was set by the ISR */
+    if (dio0_fired) {
+    	//printf("dio0 was definitely fired\r\n");
+    	//osDelay(100);
+        dio0_fired = 0; // Clear flag
+        radio_irq_handler(0); // Safely process the SPI read here!
+    }
+    
+    if (dio1_fired) {
+        dio1_fired = 0;
+        radio_irq_handler(1);
+    }
 
     os_runloop_once();
+    
+    /* Safely check and print the deferred event flag here */
+    if (lora_event_flag != 0) {
+        if (lora_event_flag == 20) {
+            printf("[DEFERRED LOG] Event 20: EV_TXSTART fired safely!\r\n");
+        }
+        lora_event_flag = 0; // Clear the flag
+    }
 
-    osDelay(2); 
+    osDelay(5); 
+
   }
   /* USER CODE END StartLoRaTask */
 }
-
-
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
@@ -311,7 +366,17 @@ uint8_t Lora_ReadReg(uint8_t addr) {
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+    // 1. Check if the interrupt came from your DIO0 pin
+    if (GPIO_Pin == GPIO_PIN_0) 
+    {
+        dio0_fired = 1; // Signals transmission completed successfully
+    }
     
+    //  2. CRUCIAL FIX: Catch the orange wire from PE1 
+    else if (GPIO_Pin == GPIO_PIN_1) 
+    {
+        dio1_fired = 1; //  Signals receive window timeout to the LMIC engine!
+    }
 }
 
 
@@ -331,6 +396,7 @@ void onEvent (ev_t ev) {
             break;
         case EV_JOINING:
             HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Event 17: EV_JOINING (Looking for gateway...)\r\n", 60, 100);
+            lora_event_flag = 17; // Assign event index
             break;
         case EV_JOINED:
             HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] EV_JOINED (Connected to network!)\r\n", 48, 100);
@@ -355,6 +421,7 @@ void onEvent (ev_t ev) {
             break;
         case EV_TXSTART:
             HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] Event 20: EV_TXSTART (Uplink/Join Frame Airbound)\r\n", 64, 100);
+            lora_event_flag = 20; // Just store the number, NO PRINTFS!
             break;
         case EV_RXSTART:
             HAL_UART_Transmit(&huart1, (uint8_t*)"[LMIC Event] EV_RXSTART (Downlink Window Active)\r\n", 50, 100);

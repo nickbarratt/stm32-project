@@ -26,22 +26,52 @@ void hal_spi_select (u1_t on) {
     }
 }
 
+// Add this bridge function so the MCCI core can control the NSS pin
+void hal_pin_nss(u1_t val) {
+    // In LMIC, 0 means activate (low), 1 means deactivate (high)
+    if (val == 0) {
+        hal_spi_select(1); // Pulls PC5 LOW
+    } else {
+        hal_spi_select(0); // Pulls PC5 HIGH
+    }
+}
+
+
 void lmic_hal_spi_write(u1_t cmd, const u1_t* buf, size_t len) {
     uint8_t command_byte = (uint8_t)(cmd | 0x80); 
     uint8_t dummy_rx;
+    
+    hal_spi_select(1);
+    
     HAL_SPI_TransmitReceive(&hspi2, &command_byte, &dummy_rx, 1, 10);
     if (len > 0) {
         HAL_SPI_Transmit(&hspi2, (uint8_t*)buf, len, 50);
     }
+    
+    hal_spi_select(0);
+    
 }
 void hal_spi_write(u1_t outval) {
     uint8_t val = (uint8_t)outval;
+    
+        // === FIX: Explicitly frame the single-byte transmission ===
+    hal_spi_select(1); // Pull PC5 LOW
+    
     HAL_SPI_Transmit(&hspi2, &val, 1, 10);
+    
+
+    
+    HAL_SPI_Transmit(&hspi2, &val, 1, 10);
+    
+        hal_spi_select(0); // Pull PC5 HIGH
 }
 
 void lmic_hal_spi_read(u1_t cmd, u1_t* buf, size_t len) {
     uint8_t command_byte = (uint8_t)(cmd & 0x7F); 
     uint8_t dummy_rx;
+    
+    hal_spi_select(1);
+       
     HAL_SPI_TransmitReceive(&hspi2, &command_byte, &dummy_rx, 1, 10);
     if (len > 0) {
         uint8_t dummy_tx = 0x00;
@@ -49,6 +79,8 @@ void lmic_hal_spi_read(u1_t cmd, u1_t* buf, size_t len) {
             HAL_SPI_TransmitReceive(&hspi2, &dummy_tx, (uint8_t*)&buf[i], 1, 10);
         }
     }
+    
+    hal_spi_select(0);
 }
 u1_t hal_spi_read(void) {
     uint8_t dummy = 0, inval = 0;
@@ -58,14 +90,18 @@ u1_t hal_spi_read(void) {
 
 void lmic_hal_pin_rst (u1_t val) {
     if (val == 0) {
+        // Drive PC4 LOW to reset the radio module
         HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4, GPIO_PIN_RESET);
-    } else if (val == 1) {
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4, GPIO_PIN_SET);
     } else {
+        // Drive PC4 HIGH for both 1 and 2, keeping it stable
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4, GPIO_PIN_SET);
+        
+        // Ensure the pin remains a solid Digital Output
         GPIO_InitTypeDef GPIO_InitStruct = {0};
         GPIO_InitStruct.Pin = GPIO_PIN_4;
-        GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+        GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
         GPIO_InitStruct.Pull = GPIO_NOPULL;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
         HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 }
@@ -88,6 +124,7 @@ void hal_waitUntil (u4_t time) { (void)lmic_hal_waitUntil(time); }
 u4_t lmic_hal_ticks (void) {
     uint32_t ms = HAL_GetTick(); // Runs continuously
     return (u4_t)((ms * 32768ULL) / 1000ULL);
+  //    return ms2osticks(xTaskGetTickCount());
 }
 u4_t hal_ticks (void) { return lmic_hal_ticks(); }
 
@@ -96,14 +133,20 @@ void lmic_hal_disableIRQs (void) {
     // Leave this blank! Your single FreeRTOS task prevents memory race conditions.
     irq_lock_cnt++;
 }
-void hal_disableIRQs (void) { lmic_hal_disableIRQs(); }
+void hal_disableIRQs (void) {
+	taskENTER_CRITICAL();
+//	lmic_hal_disableIRQs();
+}
 
 void lmic_hal_enableIRQs (void) {
     if (irq_lock_cnt > 0) {
         irq_lock_cnt--;
     }
 }
-void hal_enableIRQs (void) { lmic_hal_enableIRQs(); }
+void hal_enableIRQs (void) {
+	//lmic_hal_enableIRQs();
+	taskEXIT_CRITICAL(); 
+}
 
 
 void lmic_hal_sleep (void) {}
@@ -126,8 +169,6 @@ void lmic_hal_processPendingIRQs (void) {
     }
     current_dio1 = dio1_last_state;
 }
-
-
 
 u1_t lmic_hal_checkTimer (u4_t targettime) { (void)targettime; return 0; }
 ostime_t lmic_hal_setModuleActive (bit_t val) { (void)val; return 0; }
@@ -167,9 +208,32 @@ typedef struct {
     uint8_t dio[3]; 
 } lmic_pinmap;
 
+// Inside lmic_hal_boards.c (around line 171)
 const lmic_pinmap lmic_pins = {
-    .nss  = 1,
-    .rxtx = 0xff,
-    .rst  = 0xff,
-    .dio  = { 0, 1, 0xff } 
+    .nss = 4,       //  Change from '1' or hardcoded values to your macro
+    .rxtx = 0,
+    .rst = 0,     //  Point this to your PC4 Reset pin macro
+    .dio = {
+        0,         //  Point this to your PB2 interrupt macro
+        1,         //  Point this to your PE1 orange wire macro
+        0
+    }
 };
+
+//const lmic_pinmap lmic_pins = {
+//    .nss = 5,       //  Change from '1' or hardcoded values to your macro
+//    .rxtx = 0,
+//    .rst = 4,     //  Point this to your PC4 Reset pin macro
+//    .dio = {
+//        2,         //  Point this to your PB2 interrupt macro
+//        1,         //  Point this to your PE1 orange wire macro
+//        0
+//    }
+//};
+
+//const lmic_pinmap lmic_pins = {
+ //   .nss  = 1,
+ //   .rxtx = 0xff,
+ //   .rst  = 0xff,
+//    .dio  = { 0, 1, 0xff } 
+//};

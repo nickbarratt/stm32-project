@@ -1181,8 +1181,11 @@ int radio_init () {
     for(int i=0; i<16; i++) {
         for(int j=0; j<8; j++) {
             u1_t b; // wait for two non-identical subsequent least-significant bits
-            while( (b = readReg(LORARegRssiWideband) & 0x01) == (readReg(LORARegRssiWideband) & 0x01) );
-            randseed[i] = (randseed[i] << 1) | b;
+            uint32_t loop_safety = 0;
+            
+ 						while ( ((b = readReg(LORARegRssiWideband) & 0x01) == (readReg(LORARegRssiWideband) & 0x01)) && (loop_safety++ < 1000) );
+
+    				randseed[i] = (randseed[i] << 1) | b;
         }
     }
     randbuf[0] = 16; // set initial index
