@@ -89,21 +89,21 @@ extern SPI_HandleTypeDef hspi2;
 osThreadId_t MainLogicTaskHandle;
 const osThreadAttr_t MainLogicTask_attributes = {
   .name = "MainLogicTask",
-  .stack_size = 256 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for SerialTask */
 osThreadId_t SerialTaskHandle;
 const osThreadAttr_t SerialTask_attributes = {
   .name = "SerialTask",
-  .stack_size = 256 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* Definitions for LoRaTask */
 osThreadId_t LoRaTaskHandle;
 const osThreadAttr_t LoRaTask_attributes = {
   .name = "LoRaTask",
-  .stack_size = 512 * 4,
+  .stack_size = 1536 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
 
@@ -294,12 +294,13 @@ void StartLoRaTask(void *argument)
 	Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
 	Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
 	
-	// 4. Configure Modem for Standard LoRaWAN settings (SF12, 125kHz Bandwidth)
-	// RegModemConfig1: BW=125kHz (0x70), Coding Rate=4/5 (0x02), Explicit Header (0x00)
-	Lora_WriteReg(REG_MODEM_CONFIG_1, 0x72);
-	// RegModemConfig2: Spreading Factor 12 (0xC0), CRC On (0x04)
-	Lora_WriteReg(REG_MODEM_CONFIG_2, 0xC4);
+	// 4. Configure Modem for Standard LoRaWAN settings (SF7, 125kHz Bandwidth)
+	// RegModemConfig1: BW=125kHz (0x70), Coding Rate=4/5 (0x02), Explicit Header (0x00), LowDataRateOptimize=Off (0x00)
+	Lora_WriteReg(REG_MODEM_CONFIG_1, 0x70);
 	
+	// RegModemConfig2: Spreading Factor 7 (0x70), CRC On (0x04)
+	Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74);
+
 	// 5. Power Configuration (Max output power for legal UK unlicensed band)
 	// PA_BOOST pin enabled (0x80) + Max power output setting
 	Lora_WriteReg(REG_PA_CONFIG, 0x8F); 
