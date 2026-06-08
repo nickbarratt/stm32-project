@@ -353,7 +353,7 @@ void StartLoRaTask(void *argument)
 
     
 	    // 2. Assemble the LoRaWAN Header
-	    packet[idx++] = 0x40;        // MHDR: Unconfirmed Uplink Type
+	    packet[idx++] = 0x80;        // MHDR: Confirmed Uplink Type
 	    packet[idx++] = dev_addr[0]; // DevAddr Byte 0
 	    packet[idx++] = dev_addr[1]; // DevAddr Byte 1
 	    packet[idx++] = dev_addr[2]; // DevAddr Byte 2
@@ -370,14 +370,14 @@ void StartLoRaTask(void *argument)
     // Setup temporary array for string data
   //  uint8_t app_payload[16];
   //  strcpy((char*)app_payload, "TESTX");
-      uint8_t app_payload[16] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x00 };
+      uint8_t app_payload[4] = { 0xDE, 0xAD, 0xBE, 0xEF};
    // uint8_t app_payload_len = 4;
     	uint8_t app_payload_len = 4; // Use exact explicit length
 	    
 	    // B. Encrypt the raw string inline using your AppSKey token function
 
     // CHANGE THAT LINE TO FORCE AN EXPLICIT CONSTANT INSTEAD:
-    	encrypt_lorawan_payload(app_payload, app_payload_len, appSKey, 0x2C600027, frame_counter);
+    	encrypt_lorawan_payload(app_payload, app_payload_len, appSKey, *(uint32_t*)dev_addr, frame_counter);
 
 	    
 	    // C. Append the newly encrypted scrambled bytes into your main routing frame
@@ -450,7 +450,7 @@ void StartLoRaTask(void *argument)
 	
 	    frame_counter++; // Safely advance packet sequence tracker
 	
-	    osDelay(10000); // Wait 10 seconds
+	    osDelay(30000); // Wait 30 seconds
 	}
 
 	
