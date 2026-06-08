@@ -52,8 +52,13 @@ void MemManage_Handler(void);
 void BusFault_Handler(void);
 void UsageFault_Handler(void);
 void DebugMon_Handler(void);
+<<<<<<< HEAD
 void EXTI0_IRQHandler(void);
 void EXTI1_IRQHandler(void);
+=======
+void EXTI1_IRQHandler(void);
+void EXTI2_IRQHandler(void);
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 void TIM6_DAC_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 

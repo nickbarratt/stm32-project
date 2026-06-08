@@ -27,9 +27,15 @@ Mcu.Name=STM32F407V(E-G)Tx
 Mcu.Package=LQFP100
 Mcu.Pin0=PE3
 Mcu.Pin1=PE4
+<<<<<<< HEAD
 Mcu.Pin10=PA9
 Mcu.Pin11=PA10
 Mcu.Pin12=PE0
+=======
+Mcu.Pin10=PB10
+Mcu.Pin11=PA9
+Mcu.Pin12=PA10
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 Mcu.Pin13=PE1
 Mcu.Pin14=VP_FREERTOS_VS_CMSIS_V2
 Mcu.Pin15=VP_SYS_VS_tim6
@@ -40,8 +46,13 @@ Mcu.Pin4=PA6
 Mcu.Pin5=PA7
 Mcu.Pin6=PC4
 Mcu.Pin7=PC5
+<<<<<<< HEAD
 Mcu.Pin8=PE9
 Mcu.Pin9=PB10
+=======
+Mcu.Pin8=PB2
+Mcu.Pin9=PE9
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 Mcu.PinsNb=17
 Mcu.ThirdPartyNb=0
 Mcu.UserConstants=
@@ -50,8 +61,13 @@ MxCube.Version=6.17.0
 MxDb.Version=DB.6.0.170
 NVIC.BusFault_IRQn=true\:0\:0\:false\:false\:true\:false\:false\:false\:false
 NVIC.DebugMonitor_IRQn=true\:0\:0\:false\:false\:true\:false\:false\:false\:false
+<<<<<<< HEAD
 NVIC.EXTI0_IRQn=true\:5\:0\:false\:false\:true\:true\:true\:true\:true
 NVIC.EXTI1_IRQn=true\:5\:0\:false\:false\:true\:true\:true\:true\:true
+=======
+NVIC.EXTI1_IRQn=true\:5\:0\:false\:false\:true\:true\:true\:true\:true
+NVIC.EXTI2_IRQn=true\:5\:0\:false\:false\:true\:false\:true\:true\:true
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 NVIC.ForceEnableDMAVector=true
 NVIC.HardFault_IRQn=true\:0\:0\:false\:false\:true\:false\:false\:false\:false
 NVIC.MemoryManagement_IRQn=true\:0\:0\:false\:false\:true\:false\:false\:false\:false
@@ -83,9 +99,12 @@ PC4.GPIOParameters=GPIO_Label
 PC4.GPIO_Label=LORA_RESET
 PC4.Locked=true
 PC4.Signal=GPIO_Output
-PC5.GPIOParameters=GPIO_Label
+PC5.GPIOParameters=GPIO_Speed,PinState,GPIO_PuPd,GPIO_Label
 PC5.GPIO_Label=LORA_NSS
+PC5.GPIO_PuPd=GPIO_PULLUP
+PC5.GPIO_Speed=GPIO_SPEED_FREQ_HIGH
 PC5.Locked=true
+PC5.PinState=GPIO_PIN_SET
 PC5.Signal=GPIO_Output
 PCC.Checker=false
 PCC.Display=Plot\: All Steps
@@ -95,10 +114,13 @@ PCC.PartNumber=STM32F407VETx
 PCC.Series=STM32F4
 PCC.Temperature=25
 PCC.Vdd=3.3
+<<<<<<< HEAD
 PE0.GPIOParameters=GPIO_Label
 PE0.GPIO_Label=LORA_DIO0
 PE0.Locked=true
 PE0.Signal=GPXTI0
+=======
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 PE1.GPIOParameters=GPIO_Label
 PE1.GPIO_Label=LORA_DIO1
 PE1.Locked=true
@@ -166,10 +188,17 @@ RCC.VCOI2SOutputFreq_Value=192000000
 RCC.VCOInputFreq_Value=1000000
 RCC.VCOOutputFreq_Value=192000000
 RCC.VcooutputI2S=96000000
+<<<<<<< HEAD
 SH.GPXTI0.0=GPIO_EXTI0
 SH.GPXTI0.ConfNb=1
 SH.GPXTI1.0=GPIO_EXTI1
 SH.GPXTI1.ConfNb=1
+=======
+SH.GPXTI1.0=GPIO_EXTI1
+SH.GPXTI1.ConfNb=1
+SH.GPXTI2.0=GPIO_EXTI2
+SH.GPXTI2.ConfNb=1
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 SH.S_TIM1_CH1.0=TIM1_CH1,PWM Generation1 CH1
 SH.S_TIM1_CH1.ConfNb=1
 SH.S_TIM3_CH1.0=TIM3_CH1,PWM Generation1 CH1

@@ -61,9 +61,15 @@ void Error_Handler(void);
 #define LORA_RESET_GPIO_Port GPIOC
 #define LORA_NSS_Pin GPIO_PIN_5
 #define LORA_NSS_GPIO_Port GPIOC
+<<<<<<< HEAD
 #define LORA_DIO0_Pin GPIO_PIN_0
 #define LORA_DIO0_GPIO_Port GPIOE
 #define LORA_DIO0_EXTI_IRQn EXTI0_IRQn
+=======
+#define LORA_DIO0_Pin GPIO_PIN_2
+#define LORA_DIO0_GPIO_Port GPIOB
+#define LORA_DIO0_EXTI_IRQn EXTI2_IRQn
+>>>>>>> 60c8fc9de56c4dc2a8864957fdae83152222aadb
 #define LORA_DIO1_Pin GPIO_PIN_1
 #define LORA_DIO1_GPIO_Port GPIOE
 #define LORA_DIO1_EXTI_IRQn EXTI1_IRQn
