@@ -16,6 +16,7 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
+
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
@@ -26,8 +27,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>   // Required for printf
-#include <string.h>  // Required for string operations
+#include <stdio.h>   // Required for standard serial routing and printf / sprintf utilities
+#include <string.h>  // Required for string lengths and array operations
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,36 +47,40 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
 /* USER CODE BEGIN PV */
-uint8_t k0_last_state = 1; // Assuming pull-up (1 = released)
+// Button State Profiles (Assuming Pull-Up Configuration: 1 = Released)
+uint8_t k0_last_state = 1; 
 uint8_t k1_last_state = 1;
 
+// PWM and Timing Diagnostics Tracking
 uint32_t duty_cycle = 500;
-
 uint32_t lastBlinkTime = 0;
 uint8_t  ledIsOn = 0;
 
-
-
+// The Single Global Source of Truth LoRaWAN Tracking Variable
+uint16_t frame_counter = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
-
+// Wear-Leveled Flash Memory Storage Driver Prototypes
+uint16_t Load_Frame_Counter_Wear_Leveled(void);
+void Save_Frame_Counter_Wear_Leveled(uint16_t counter);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 #ifdef __GNUC__
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #else
 #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
 #endif
 
+/**
+  * @brief  Retargets the C library printf function to the standard UART pipeline.
+  */
 PUTCHAR_PROTOTYPE
 {
   HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
@@ -87,51 +92,61 @@ PUTCHAR_PROTOTYPE
   * @brief  The application entry point.
   * @retval int
   */
+
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
-
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM3_Init();
-  MX_USART1_UART_Init();
+  MX_USART1_UART_Init(); // Hardware serial port is now officially turned on!
   MX_TIM1_Init();
   MX_SPI2_Init();
-  /* USER CODE BEGIN 2 */
+  
+/* USER CODE BEGIN 2 */
+// Pristine, safe startup scanner without any task management blocks
+printf("\r\n--- [Full-Sector 7 Scanner Active] ---\r\n");
+uint32_t active_entries_found = 0;
+
+for (uint32_t i = 0; i < 500; i++) { // Limit scan boundary to first 500 lines to prevent watchdog starvation
+    uint32_t addr = 0x08080000 + (i * 2);
+    uint16_t raw_value = *(__IO uint16_t*)addr;
+    
+    if (raw_value != 0xFFFF) {
+        printf("Slot [%05d]: Value = %d\r\n", (int)i, raw_value);
+        active_entries_found++;
+    } else {
+        break; // Stop scanning immediately when hitting the pristine blank line threshold
+    }
+}
+printf("-------------------------------------------\r\n\r\n");
+
+// Call your safe loading function
+frame_counter = Load_Frame_Counter_Wear_Leveled();              
+printf("[LoRa] Recovered Frame Counter from Flash: %d\r\n", frame_counter);
+  // ---------------------------------------------------------------
+
   // This starts the hardware PWM on the specified channels
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); 
-	printf("PWM System Active at 1kHz\r\n");
+  printf("PWM System Active at 1kHz\r\n");
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 	
-	// Enable Clock for Port A
+  // Enable Clock for Port A
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
-  //uint16_t dimmedLevel = 500; // Set your desired dimness here
-
-
-// Clear the terminal screen and reset cursor (ANSI escape codes)
-	printf("\033[2J\033[H"); 
-	printf("=================================\r\n");
+  // Clear the terminal screen and reset cursor (ANSI escape codes)
+  printf("\033[2J\033[H"); 
+  printf("=================================\r\n");
 	printf("   JL32-F4VE System Initialised  \r\n");
 	printf("   PWM Frequency: 1kHz  (PE9)    \r\n");
 	printf("=================================\r\n");

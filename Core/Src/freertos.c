@@ -12,9 +12,9 @@
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
-*
-******************************************************************************
-*/
+  *
+  ******************************************************************************
+  */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -25,22 +25,24 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "main.h"  // Ensures types like UART_HandleTypeDef are known
-#include <string.h> // For strlen() if you're using it in serial tasks
+#include <string.h> // For strlen() and standard string handling
+#include <stdio.h>  // For sprintf() formatting tracking utilities
 
-#include <stdio.h>  // Fixes the printf error
-
-// Link hardware handles from main.c
+// Hardware Handle Linkage from main.c
 extern TIM_HandleTypeDef htim1;  
 extern TIM_HandleTypeDef htim3;
 extern UART_HandleTypeDef huart1;
+extern SPI_HandleTypeDef hspi2;
 
-// Link your logic variables from main.c
+// Shared Hardware State Variables from main.c
 extern uint32_t lastBlinkTime;
 extern uint8_t  ledIsOn;
 extern uint32_t duty_cycle;
 extern uint8_t  k0_last_state;
 extern uint8_t  k1_last_state;
+
+// Single Source-of-Truth LoRaWAN Frame Counter Variable
+extern uint16_t frame_counter;
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,21 +52,7 @@ extern uint8_t  k1_last_state;
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-/* USER CODE BEGIN Variables */
-extern SPI_HandleTypeDef hspi2;
-#define RF95_REG_FIFO 0x00
-#define RF95_REG_OP_MODE 0x01
-#define RF95_MODE_TX 0x03
-
+// LoRa RF95 Transceiver Register Map Definitions
 #define REG_FIFO                 0x00
 #define REG_OP_MODE              0x01
 #define REG_FRF_MSB              0x06
@@ -78,13 +66,28 @@ extern SPI_HandleTypeDef hspi2;
 #define REG_PAYLOAD_LENGTH       0x22
 #define REG_DIO_MAPPING_1        0x40
 
-// Mode bits
+// Radio Functional Operational Modes
 #define MODE_LONG_RANGE_MODE     0x80
 #define MODE_SLEEP               0x00
 #define MODE_STDBY               0x01
 #define MODE_TX                  0x03
 
+// Legacy Alias Support
+#define RF95_REG_FIFO            REG_FIFO
+#define RF95_REG_OP_MODE         REG_OP_MODE
+#define RF95_MODE_TX             MODE_TX
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+/* USER CODE BEGIN Variables */
+
 /* USER CODE END Variables */
+
 /* Definitions for MainLogicTask */
 osThreadId_t MainLogicTaskHandle;
 const osThreadAttr_t MainLogicTask_attributes = {
@@ -109,15 +112,19 @@ const osThreadAttr_t LoRaTask_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+// Core Radio Driver Commands
 void Lora_WriteReg(uint8_t addr, uint8_t val);
 uint8_t Lora_ReadReg(uint8_t addr);
-void calculate_lorawan_mic(uint8_t *packet, uint8_t payload_len, const uint8_t *nwkSKey, uint8_t *mic_out);
 void Lora_ReadFIFOVerify(uint8_t *buffer, uint8_t length);
-/* Private function prototypes -----------------------------------------------*/
+
+// Wear-Leveled Flash Counter Module Drivers
+uint16_t Load_Frame_Counter_Wear_Leveled(void);
+void Save_Frame_Counter_Wear_Leveled(uint16_t counter);
+
+// LoRaWAN Cryptographic Libraries Linkage
 extern void aes_encrypt_block(const uint8_t *key, const uint8_t *input, uint8_t *output);
 extern void calculate_lorawan_mic(uint8_t *packet, uint8_t payload_len, const uint8_t *nwkSKey, uint8_t *mic_out);
 extern void encrypt_lorawan_payload(uint8_t *payload, uint8_t payload_len, const uint8_t *appSKey, uint32_t devAddr, uint16_t fCnt);
-
 /* USER CODE END FunctionPrototypes */
 
 void StartMainLogicTask(void *argument);
@@ -135,6 +142,7 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
    /* Run time stack overflow checking is performed if
    configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
    called if a stack overflow is detected. */
+   for(;;); // Trap context execution here for debugging stack breaks
 }
 /* USER CODE END 4 */
 
@@ -143,7 +151,9 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
   * @param  None
   * @retval None
   */
-void MX_FREERTOS_Init(void) {
+void MX_FREERTOS_Init(void) 
+{
+
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
@@ -296,7 +306,7 @@ void StartLoRaTask(void *argument)
 	osDelay(10);
 	
 	// 2. Set Frequency to 868.1 MHz (Formula: F_RF / (32MHz / 2^19))
-	// 868100000 / 61.03515625 = 14223122 = 0xD91E12
+	// 868100000 / 61.03515625 = 14223122 = 0xD90712
 	Lora_WriteReg(REG_FRF_MSB, 0xD9);
 	Lora_WriteReg(REG_FRF_MID, 0x07);
 	Lora_WriteReg(REG_FRF_LSB, 0x12);
@@ -341,10 +351,10 @@ void StartLoRaTask(void *argument)
 	    uint8_t idx = 0;    
 	
 	    // 1. Define your Device parameters
-	    uint8_t dev_addr[4] = { 0x2C, 0x60, 0x00, 0x27 }; // 2700602C LSB array format
-	    uint32_t dev_addr_int = 0x2C600027;               // Numeric format for crypto block math
-	    static uint16_t frame_counter = 1000;              
-	
+	    uint8_t dev_addr[4] = { 0x2D, 0x61, 0x00, 0x27 }; // 2700602C LSB array format
+	//    uint32_t dev_addr_int = 0x2C600027;               // Numeric format for crypto block math
+
+    
 	    // 2. Assemble the LoRaWAN Header
 	    packet[idx++] = 0x40;        // MHDR: Unconfirmed Uplink Type
 	    packet[idx++] = dev_addr[0]; // DevAddr Byte 0
@@ -363,20 +373,20 @@ void StartLoRaTask(void *argument)
     // Setup temporary array for string data
   //  uint8_t app_payload[16];
   //  strcpy((char*)app_payload, "TESTX");
-        uint8_t app_payload[16] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x00 };
+      uint8_t app_payload[16] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x00 };
    // uint8_t app_payload_len = 4;
-    uint8_t app_payload_len = 4; // Use exact explicit length
+    	uint8_t app_payload_len = 4; // Use exact explicit length
 	    
 	    // B. Encrypt the raw string inline using your AppSKey token function
 
     // CHANGE THAT LINE TO FORCE AN EXPLICIT CONSTANT INSTEAD:
-    encrypt_lorawan_payload(app_payload, app_payload_len, appSKey, 0x2C600027, frame_counter);
+    	encrypt_lorawan_payload(app_payload, app_payload_len, appSKey, 0x2C600027, frame_counter);
 
 	    
 	    // C. Append the newly encrypted scrambled bytes into your main routing frame
-    for(uint8_t i = 0; i < 4; i++) {
-        packet[idx++] = app_payload[i];
-    }
+    	for(uint8_t i = 0; i < 4; i++) {
+     	   packet[idx++] = app_payload[i];
+    	}
 	    
 	    // ==========================================================
 	    
@@ -438,6 +448,8 @@ void StartLoRaTask(void *argument)
 
 	    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Broadcasting Styled Frame...\r\n", 37, 100);
 	    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+	    
+	    Save_Frame_Counter_Wear_Leveled(frame_counter);
 	
 	    frame_counter++; // Safely advance packet sequence tracker
 	
