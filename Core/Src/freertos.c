@@ -87,7 +87,6 @@ extern uint16_t frame_counter;
 /* USER CODE BEGIN Variables */
 
 /* USER CODE END Variables */
-
 /* Definitions for MainLogicTask */
 osThreadId_t MainLogicTaskHandle;
 const osThreadAttr_t MainLogicTask_attributes = {
@@ -151,9 +150,7 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
   * @param  None
   * @retval None
   */
-void MX_FREERTOS_Init(void) 
-{
-
+void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */

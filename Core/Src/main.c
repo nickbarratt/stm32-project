@@ -16,7 +16,6 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
-
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
@@ -47,6 +46,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+
 /* USER CODE BEGIN PV */
 // Button State Profiles (Assuming Pull-Up Configuration: 1 = Released)
 uint8_t k0_last_state = 1; 
@@ -92,27 +92,36 @@ PUTCHAR_PROTOTYPE
   * @brief  The application entry point.
   * @retval int
   */
-
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
+
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM3_Init();
-  MX_USART1_UART_Init(); // Hardware serial port is now officially turned on!
+  MX_USART1_UART_Init();
   MX_TIM1_Init();
   MX_SPI2_Init();
-  
-/* USER CODE BEGIN 2 */
+  MX_TIM2_Init();
+  /* USER CODE BEGIN 2 */
 // Pristine, safe startup scanner without any task management blocks
 printf("\r\n--- [Full-Sector 7 Scanner Active] ---\r\n");
 uint32_t active_entries_found = 0;
