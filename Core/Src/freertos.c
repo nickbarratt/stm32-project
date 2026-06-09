@@ -22,6 +22,7 @@
 #include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
+#include <limits.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -66,11 +67,13 @@ extern uint16_t frame_counter;
 #define REG_PAYLOAD_LENGTH       0x22
 #define REG_DIO_MAPPING_1        0x40
 
+
 // Radio Functional Operational Modes
 #define MODE_LONG_RANGE_MODE     0x80
 #define MODE_SLEEP               0x00
 #define MODE_STDBY               0x01
 #define MODE_TX                  0x03
+#define MODE_RX_SINGLE					 0x06
 
 // Legacy Alias Support
 #define RF95_REG_FIFO            REG_FIFO
@@ -85,6 +88,16 @@ extern uint16_t frame_counter;
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+typedef enum {
+    STATE_INIT,
+    STATE_TX,
+    STATE_RX1,
+    STATE_SLEEP
+} LoraState_t;
+
+static LoraState_t current_state = STATE_INIT;
+const uint32_t eu868_channels[3] = {868100000, 868300000, 868500000};
+static uint8_t channel_index = 0;
 
 /* USER CODE END Variables */
 /* Definitions for MainLogicTask */
@@ -115,6 +128,7 @@ const osThreadAttr_t LoRaTask_attributes = {
 void Lora_WriteReg(uint8_t addr, uint8_t val);
 uint8_t Lora_ReadReg(uint8_t addr);
 void Lora_ReadFIFOVerify(uint8_t *buffer, uint8_t length);
+void Lora_SetFrequency(uint32_t frequency_hz);
 
 // Wear-Leveled Flash Counter Module Drivers
 uint16_t Load_Frame_Counter_Wear_Leveled(void);
@@ -278,191 +292,209 @@ void StartLoRaTask(void *argument)
 {
   /* USER CODE BEGIN StartLoRaTask */
 
-  // 1. Copy your secret 16-byte key straight out of your TTN Console dashboard settings
+  // secret keys recovered from your dashboard session
   const uint8_t nwkSKey[16] = { 0x15, 0x95, 0x75, 0x32, 0x81, 0xC7, 0x92, 0x28, 0x75, 0x4D, 0x76, 0xA0, 0x1D, 0xA2, 0xFD, 0x7C };
   const uint8_t appSKey[16] = { 0x29, 0x93, 0x62, 0x1E, 0x0C, 0x03, 0xE1, 0xCA, 0x6B, 0x28, 0x45, 0x81, 0x40, 0x45, 0xFB, 0x46 };
 
-  /* 1. Hardware Reset */
+  uint8_t packet[64]; 
+  uint8_t idx = 0;
+  uint8_t irqFlags = 0;
+
+  /* ==========================================================
+   * 🏭 STAGE A: ONE-TIME BOOT UP HARDWARE VALIDATION
+   * ========================================================== */
   HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_RESET);
   osDelay(10);
   HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_SET);
   osDelay(10);
 
-  /* 2. SPI Communication Test */
-  // Register 0x42 is RegVersion. On RFM95W/SX1276, it always returns 0x12.
   uint8_t version = Lora_ReadReg(0x42);
-  
-  // Use version to protect the system
   if (version != 0x12) {
       HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] ERROR: Radio core not found!\r\n", 37, 100);
-      for(;;) { osDelay(1000); } // Loop forever here and protect the radio
+      for(;;) { osDelay(1000); } 
   }
   
-  // 1. Put radio in Sleep mode to allow changing to LoRa mode
-	Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
-	osDelay(10);
-	
-	// 2. Set Frequency to 868.1 MHz (Formula: F_RF / (32MHz / 2^19))
-	// 868100000 / 61.03515625 = 14223122 = 0xD90712
-	Lora_WriteReg(REG_FRF_MSB, 0xD9);
-	Lora_WriteReg(REG_FRF_MID, 0x07);
-	Lora_WriteReg(REG_FRF_LSB, 0x12);
-	
-	// 3. Configure Base FIFO addresses
-	Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
-	Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-	
-	// 4. Configure Modem for Standard LoRaWAN settings (SF7, 125kHz Bandwidth)
-	// RegModemConfig1: BW=125kHz (0x70), Coding Rate=4/5 (0x02), Explicit Header (0x00), LowDataRateOptimize=Off (0x00)
-	Lora_WriteReg(REG_MODEM_CONFIG_1, 0x70);
-	
-	// RegModemConfig2: Spreading Factor 7 (0x70), CRC On (0x04)
-	Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74);
+  // Baseline modem register alignments
+  Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
+  osDelay(10);
+  Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
+  Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
+  Lora_WriteReg(REG_MODEM_CONFIG_1, 0x70); // 125kHz, CR 4/5
+  Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74); // SF7, CRC On
+  Lora_WriteReg(REG_PA_CONFIG, 0x8F);      // PA_BOOST Enabled, Max Power
 
-	// 5. Power Configuration (Max output power for legal UK unlicensed band)
-	// PA_BOOST pin enabled (0x80) + Max power output setting
-	Lora_WriteReg(REG_PA_CONFIG, 0x8F); 
-	
-	// 6. Map DIO0 to trigger on TXDone (Transmission Complete)
-	// This will physically pull your PE0 (or interrupt pin) High when finished transmitting
-	Lora_WriteReg(REG_DIO_MAPPING_1, 0x40);
-	
-	// 7. Bring radio into Standby mode to ready the synthesiser
-	Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_STDBY);
-	
-	    // RegInvertInq (Register 0x33). Set bit 6 to 0 to disable InvertIQ on TX
-    // Standard default configuration value for basic uploops is 0x27
-    Lora_WriteReg(0x33, 0x27); 
+  /* ==========================================================
+   * 🔄 STAGE B: THE CORE OS STATE ENGINE LOOP
+   * ========================================================== */
+  for(;;)
+  {
+      switch(current_state) {
+
+          case STATE_INIT:
+              HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n[LoRa] -> State: INIT. Staging payload...\r\n", 46, 100);
+              
+              // Dynamic cleanup resets to avoid registration lockups
+              Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_STDBY);
+              osDelay(5);
+              Lora_WriteReg(0x12, 0xFF); // Clear all stale flags
+              
+              // Pull frequency from your dynamic channel array
+              uint32_t active_tx_frequency = eu868_channels[channel_index];
+              Lora_SetFrequency(active_tx_frequency);
+              
+              // Align operational modes for Transmission
+              Lora_WriteReg(REG_DIO_MAPPING_1, 0x40); // Map DIO0 to TxDone
+              Lora_WriteReg(0x33, 0x27);              // Normal IQ for TX
+           //   Lora_WriteReg(0x3B, 0x1D);							// RegInvertIq2 standard default <-- ADDED FOR SX1276 RESET
+
+              // Assemble the exact framework
+              idx = 0;
+              uint8_t dev_addr[4] = { 0x2D, 0x61, 0x00, 0x27 }; // 2700612D LSB Array format
+              
+              packet[idx++] = 0x40;        // MHDR: Confirmed Uplink Type (Forced Gateway ACK Request)
+              packet[idx++] = dev_addr[0]; 
+              packet[idx++] = dev_addr[1]; 
+              packet[idx++] = dev_addr[2]; 
+              packet[idx++] = dev_addr[3]; 
+              packet[idx++] = 0x00;        // FCtrl
+              packet[idx++] = (frame_counter & 0xFF);        
+              packet[idx++] = ((frame_counter >> 8) & 0xFF); 
+              packet[idx++] = 0x01;        // FPort
+
+              // Staging application tracking structures
+              uint8_t app_payload[16];
+              strcpy((char*)app_payload, "HELLO");
+              uint8_t app_payload_len = strlen((char*)app_payload);
+
+              // Encrypt data inline
+              encrypt_lorawan_payload(app_payload, app_payload_len, appSKey, *(uint32_t*)dev_addr, frame_counter);
+
+              // Fix: Append matching exact variable lengths dynamically
+              for(uint8_t i = 0; i < app_payload_len; i++) {
+                  packet[idx++] = app_payload[i];
+              }
+
+              // Evaluate MIC Signature
+              uint8_t payload_len_before_mic = idx;
+              uint8_t real_mic[4];
+              calculate_lorawan_mic(packet, payload_len_before_mic, nwkSKey, real_mic);
+
+              packet[idx++] = real_mic[0];
+              packet[idx++] = real_mic[1];
+              packet[idx++] = real_mic[2];
+              packet[idx++] = real_mic[3];
+
+              // Push array payload to hardware FIFO
+              Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
+              Lora_WriteReg(REG_PAYLOAD_LENGTH, idx); // Removed 0x22 FSK overwrite bug
+              for(uint8_t i = 0; i < idx; i++) {
+                  Lora_WriteReg(REG_FIFO, packet[i]);
+              }
+
+              // --- FIFO Verification Diagnostic Block ---
+              Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
+              uint8_t readback_verify[64] = {0};
+              Lora_ReadFIFOVerify(readback_verify, idx);
+              
+              char uart_buf[100];
+              HAL_UART_Transmit(&huart1, (uint8_t*)"--- [LoRa FIFO Check] ---\r\n", 27, 100);
+              for(uint8_t i = 0; i < idx; i++) {
+                  sprintf(uart_buf, "Byte [%02d]: Written=0x%02X | RadioHas=0x%02X\r\n", i, packet[i], readback_verify[i]);
+                  HAL_UART_Transmit(&huart1, (uint8_t*)uart_buf, strlen(uart_buf), 100);
+              }
+              HAL_UART_Transmit(&huart1, (uint8_t*)"---------------------------\r\n", 29, 100);
+              
+              Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00); // Re-zero tracking index
+              // ------------------------------------------
+
+              HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> Broadcasting Styled Frame...\r\n", 39, 100);
+              
+              // Shift state and fire
+              current_state = STATE_TX;
+              Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+              break;
+
+
+          case STATE_TX:
+              // 1. Synchronously wait for the physical transmission to clear the airwaves
+              ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+              
+              // 2. Acknowledge and drop the hardware flag
+              Lora_WriteReg(0x12, 0x08); 
+              
+              // 3. Save current counter immediately to maintain timeline accuracy
+              Save_Frame_Counter_Wear_Leveled(frame_counter);
+              frame_counter++; 
+
+              HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: TX Done. Starting 1s countdown to RX1...\r\n", 58, 100);
+
+
+
+              // 5. Shift modem parameters over to Receive mappings
+              Lora_WriteReg(REG_DIO_MAPPING_1, 0x00); // Re-map DIO0 to watch for RxDone
+              Lora_WriteReg(0x33, 0x66);              // Invert IQ for gateway synchronization
+        //      Lora_WriteReg(0x3B, 0x19);
+              
+              // 3. EXTEND SYMBOL TIMEOUT (CRITICAL FOR 950MS TIMING)
+    // This forces the SX1276 to keep its receiver open much longer, 
+    // ensuring it doesn't give up before the gateway fires.
+    Lora_WriteReg(0x1F, 0x3F);              // RegSymbTimeout = 63 symbols
     
-
-	osDelay(10);
-
-
-	for(;;)
-	{
-	    // ==========================================================
-	    // TRANSMIT LOOP 
-	    // ==========================================================
-	    
-	    uint8_t packet[64]; 
-	    uint8_t idx = 0;    
-	
-	    // 1. Define your Device parameters
-	    uint8_t dev_addr[4] = { 0x2D, 0x61, 0x00, 0x27 }; // 2700602C LSB array format
-	//    uint32_t dev_addr_int = 0x2C600027;               // Numeric format for crypto block math
-
-    
-	    // 2. Assemble the LoRaWAN Header
-	    packet[idx++] = 0x40;        // MHDR: Confirmed Uplink Type
-	    packet[idx++] = dev_addr[0]; // DevAddr Byte 0
-	    packet[idx++] = dev_addr[1]; // DevAddr Byte 1
-	    packet[idx++] = dev_addr[2]; // DevAddr Byte 2
-	    packet[idx++] = dev_addr[3]; // DevAddr Byte 3
-	    packet[idx++] = 0x00;        // FCtrl
-	    packet[idx++] = (frame_counter & 0xFF);        // FCnt Low Byte
-	    packet[idx++] = ((frame_counter >> 8) & 0xFF); // FCnt High Byte
-	    packet[idx++] = 0x01;        // FPort
-	
-	    // ==========================================================
-	    // INCORPORATE APPKEY (APPSKEY) HERE
-	    // ==========================================================
-	    
-    // Setup temporary array for string data
-    uint8_t app_payload[16];
-    strcpy((char*)app_payload, "HELLO");
-    //  uint8_t app_payload[4] = { 0xDE, 0xAD, 0xBE, 0xEF};
-  //  uint8_t app_payload_len = 5;
-    	uint8_t app_payload_len = strlen((char*)app_payload); // Use exact explicit length
-	    
-	    // B. Encrypt the raw string inline using your AppSKey token function
-
-    // CHANGE THAT LINE TO FORCE AN EXPLICIT CONSTANT INSTEAD:
-    	encrypt_lorawan_payload(app_payload, app_payload_len, appSKey, *(uint32_t*)dev_addr, frame_counter);
-
-	    
-	    // C. Append the newly encrypted scrambled bytes into your main routing frame
-    	for(uint8_t i = 0; i < 5; i++) {
-     	   packet[idx++] = app_payload[i];
-    	}
-	    
-	    // ==========================================================
-	    
-	    // 2. Calculate length BEFORE the trailing MIC slots
-	    uint8_t payload_len_before_mic = idx;
-	
-	    // 3. Compute the legitimate math signature over the ENCRYPTED data block
-	    uint8_t real_mic[4];
-	    calculate_lorawan_mic(packet, payload_len_before_mic, nwkSKey, real_mic);
-	
-	    // 4. Safely load the real math outputs where the zeros used to sit
-	    packet[idx++] = real_mic[0];
-	    packet[idx++] = real_mic[1];
-	    packet[idx++] = real_mic[2];
-	    packet[idx++] = real_mic[3];
-	
-	    // 5. Send this newly signed payload out via your standard FIFO loop
-	    Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-	    
-	    Lora_WriteReg(0x22, idx); // 0x22 is RegPayloadLength. Explicitly use total byte count 'idx'
-	    
-	    Lora_WriteReg(REG_PAYLOAD_LENGTH, idx);
-	    for(uint8_t i = 0; i < idx; i++) {
-	        Lora_WriteReg(REG_FIFO, packet[i]);
-	    }
+              // Move pointer and open the window
+              current_state = STATE_RX1;
+              
+                            // 4. Strict 1-second delay execution
+              osDelay(pdMS_TO_TICKS(950UL));
+              
+              Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
+              break;
 
 
+          case STATE_RX1:
+              // 1. Safety net wait to handle automated silent timeout windows gracefully
+              BaseType_t rx_notified = xTaskNotifyWait(0x00, ULONG_MAX, NULL, pdMS_TO_TICKS(200));
+              
+              // 2. Capture and reset flags to guarantee safe loop re-entry paths
+              irqFlags = Lora_ReadReg(0x12);
+              Lora_WriteReg(0x12, 0xFF); 
+
+              // 3. Evaluate matching metrics
+              if (rx_notified == pdTRUE && (irqFlags & 0x40) && !(irqFlags & 0x20)) {
+                  HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 SUCCESS! Valid ACK packet caught.\r\n", 56, 100);
+              } else if (irqFlags & 0x20) {
+                  HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Packet caught but failed CRC.\r\n", 52, 100);
+              } else {
+                  HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Closed (Timeout/No Response).\r\n", 52, 100);
+              }
+
+              // Advance to system sleep
+              current_state = STATE_SLEEP;
+              break;
 
 
+          case STATE_SLEEP:
+              HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: SLEEP. Powering down radio for 30s...\r\n", 56, 100);
+              
+              // Drop radio core down to micro-amps
+              Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
 
-    // ==========================================================
-    // 💾 PASTE THE FIFO READBACK DIAGNOSTIC BLOCK HERE:
-    // ==========================================================
-    
-    // 1. Point the radio's memory pointer back to the start of the FIFO to read it
-    Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-    
-    // 2. Set up a verification array block on the stack
-    uint8_t readback_verify[64] = {0};
-    
-    // 3. Read back what the chip actually stored
-    Lora_ReadFIFOVerify(readback_verify, idx);
-    
-    // 4. Print the comparison table out to your UART terminal
-    char uart_buf[100];
-    HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n--- [LoRa FIFO Check] ---\r\n", 29, 100);
-    for(uint8_t i = 0; i < idx; i++) {
-        sprintf(uart_buf, "Byte [%02d]: Written=0x%02X  |  RadioHas=0x%02X\r\n", i, packet[i], readback_verify[i]);
-        HAL_UART_Transmit(&huart1, (uint8_t*)uart_buf, strlen(uart_buf), 100);
-    }
-    HAL_UART_Transmit(&huart1, (uint8_t*)"---------------------------\r\n\r\n", 31, 100);
+              // Cycle channel pointer for the upcoming iteration loop
+              channel_index++;
+              if (channel_index >= 3) {
+                  channel_index = 0;
+              }
 
-    // 5. CRITICAL STEP: Point the hardware pointer back to 0x00 so it transmits from the start
-    Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-    
-    // ==========================================================
+              // Sleep the FreeRTOS task completely (set to 30s loop interval for verification)
+              osDelay(pdMS_TO_TICKS(120000UL)); 
 
-
-
-	    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Broadcasting Styled Frame...\r\n", 37, 100);
-	    
-	    
-	    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
-	    
-	    ulTaskNotifyTake(pdTRUE, portMAX_DELAY); 
-	    
-	    Lora_WriteReg(0x12, 0x08); //Clear ISR
-	    
-	    Save_Frame_Counter_Wear_Leveled(frame_counter);
-	
-	    frame_counter++; // Safely advance packet sequence tracker
-	
-	    osDelay(300000); // Wait 30 minutes
-	}
-
-	
-  
+              // Return to init phase to restart hands-free
+              current_state = STATE_INIT;
+              break;
+      }
+  }
   /* USER CODE END StartLoRaTask */
 }
+
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
@@ -534,6 +566,14 @@ void Lora_ReadFIFOVerify(uint8_t *buffer, uint8_t length) {
 }
 
 
+// Pure integer frequency configuration math
+void Lora_SetFrequency(uint32_t frequency_hz)
+{
+    uint32_t frf = (uint32_t)(((uint64_t)frequency_hz * 16384) / 1000000);
+    Lora_WriteReg(REG_FRF_MSB, (uint8_t)((frf >> 16) & 0xFF));
+    Lora_WriteReg(REG_FRF_MID, (uint8_t)((frf >> 8)  & 0xFF));
+    Lora_WriteReg(REG_FRF_LSB, (uint8_t)(frf         & 0xFF));
+}
 
 /* USER CODE END Application */
 
