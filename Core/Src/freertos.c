@@ -98,6 +98,7 @@ typedef enum {
 static LoraState_t current_state = STATE_INIT;
 const uint32_t eu868_channels[3] = {868100000, 868300000, 868500000};
 static uint8_t channel_index = 0;
+uint8_t lora_rx_packet_buffer[256];
 
 /* USER CODE END Variables */
 /* Definitions for MainLogicTask */
@@ -436,22 +437,26 @@ void StartLoRaTask(void *argument)
               Lora_WriteReg(0x33, 0x66);              // Invert IQ for gateway synchronization
         //      Lora_WriteReg(0x3B, 0x19);
               
-              // 3. EXTEND SYMBOL TIMEOUT (CRITICAL FOR 950MS TIMING)
-    // This forces the SX1276 to keep its receiver open much longer, 
-    // ensuring it doesn't give up before the gateway fires.
-    Lora_WriteReg(0x1F, 0x3F);              // RegSymbTimeout = 63 symbols
+              
+              // --- FIXED: MAX OUT THE HARDWARE TIMEOUT NET ---
+              // Force the upper 2 bits of SymbTimeout to 1 (Register 0x1E bits 1:0)
+              Lora_WriteReg(0x1E, Lora_ReadReg(0x1E) | 0x03); 
+              // Max out the lower 8 bits of SymbTimeout to 255 (Register 0x1F)
+              Lora_WriteReg(0x1F, 0xFF); 
+              // Total timeout is now 1023 symbols (~1047ms), preventing premature closing.
+
     
               // Move pointer and open the window
               current_state = STATE_RX1;
               
-                            // 4. Strict 1-second delay execution
+              // 4. Strict 1-second delay execution
               osDelay(pdMS_TO_TICKS(950UL));
               
               Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
               break;
 
 
-          case STATE_RX1:
+           case STATE_RX1:
               // 1. Safety net wait to handle automated silent timeout windows gracefully
               BaseType_t rx_notified = xTaskNotifyWait(0x00, ULONG_MAX, NULL, pdMS_TO_TICKS(200));
               
@@ -463,20 +468,17 @@ void StartLoRaTask(void *argument)
               if (rx_notified == pdTRUE && (irqFlags & 0x40) && !(irqFlags & 0x20)) {
                   HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 SUCCESS! Valid ACK packet caught.\r\n", 56, 100);
                   
-                  // --- START PAYLOAD EXTRACTION ---
-                  uint8_t rx_buffer[64] = {0};
+                  // Read length securely
                   uint8_t payload_length = Lora_ReadReg(0x13); // RegRxNbBytes
 
-                  if (payload_length > 0 && payload_length <= 64) {
-                      // Fetch the starting memory address of the last received packet
+                  // HARD BOUNDARY CHECK: Prevent memory overruns
+                  if (payload_length > 0 && payload_length <= 256) {
                       uint8_t current_fifo_addr = Lora_ReadReg(0x10); // RegFifoRxCurrentAddr
-                      
-                      // Force the internal SPI pointer to hop to that specific location
                       Lora_WriteReg(0x0D, current_fifo_addr);         // RegFifoAddrPtr
 
-                      // Sequentially read the bytes directly out of the FIFO data stream
+                      // Stream safely into the global/static buffer
                       for (uint8_t i = 0; i < payload_length; i++) {
-                          rx_buffer[i] = Lora_ReadReg(0x00);          // RegFifo
+                          lora_rx_packet_buffer[i] = Lora_ReadReg(0x00); // RegFifo
                       }
 
                       // Print out the raw hexadecimal values over UART
@@ -484,23 +486,29 @@ void StartLoRaTask(void *argument)
                       int len = snprintf(hex_print_buf, sizeof(hex_print_buf), "[LoRa] Extracted %d bytes: ", payload_length);
                       HAL_UART_Transmit(&huart1, (uint8_t*)hex_print_buf, len, 100);
 
+                      // Safely display the data bytes
                       for (uint8_t i = 0; i < payload_length; i++) {
-                          len = snprintf(hex_print_buf, sizeof(hex_print_buf), "%02X ", rx_buffer[i]);
+                          // Bounded print to prevent string buffer overflow
+                          len = snprintf(hex_print_buf, sizeof(hex_print_buf), "%02X ", lora_rx_packet_buffer[i]);
                           HAL_UART_Transmit(&huart1, (uint8_t*)hex_print_buf, len, 100);
                       }
                       HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n", 2, 100);
                   }
-                  // --- END PAYLOAD EXTRACTION ---
-
               } else if (irqFlags & 0x20) {
                   HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Packet caught but failed CRC.\r\n", 52, 100);
               } else {
                   HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Closed (Timeout/No Response).\r\n", 52, 100);
               }
 
-              // Advance to system sleep
+              // 4. CLEAN THE HARDWARE POINTERS SAFELY
+              Lora_WriteReg(0x01, 0x80 | 0x01);     // Force Standby mode
+              uint8_t rx_base = Lora_ReadReg(0x0F); // Read RegFifoRxBaseAddr
+              Lora_WriteReg(0x0D, rx_base);         // Reset RegFifoAddrPtr to base point
+
+              // 5. Advance to system sleep securely
               current_state = STATE_SLEEP;
               break;
+
 
 
 
