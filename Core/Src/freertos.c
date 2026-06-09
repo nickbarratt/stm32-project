@@ -444,13 +444,19 @@ void StartLoRaTask(void *argument)
 
 
 	    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] Broadcasting Styled Frame...\r\n", 37, 100);
+	    
+	    
 	    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+	    
+	    ulTaskNotifyTake(pdTRUE, portMAX_DELAY); 
+	    
+	    Lora_WriteReg(0x12, 0x08); //Clear ISR
 	    
 	    Save_Frame_Counter_Wear_Leveled(frame_counter);
 	
 	    frame_counter++; // Safely advance packet sequence tracker
 	
-	    osDelay(30000); // Wait 30 seconds
+	    osDelay(300000); // Wait 30 minutes
 	}
 
 	
@@ -485,12 +491,23 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == LORA_DIO0_Pin) // Check if the interrupt came from PE0
   {
+  	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // ONLY notify the waiting FreeRTOS task. Do no SPI, do no UART!
+    if (LoRaTaskHandle != NULL) {
+        vTaskNotifyGiveFromISR(LoRaTaskHandle, &xHigherPriorityTaskWoken);
+    }
+
+    // Force FreeRTOS to instantly switch to the LoRa task if it has high priority
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    
+    
     // Clear the radio's internal IRQ flags so it can transmit again next time
     // Register 0x12 is RegIrqFlags. Writing 0x08 clears the TxDone flag.
-    Lora_WriteReg(0x12, 0x08);
+   // Lora_WriteReg(0x12, 0x08);
     
     // Print immediate confirmation to your serial monitor
-    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> TXDone Interrupt Received! Packet is in the air.\r\n", 60, 10);
+   // HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> TXDone Interrupt Received! Packet is in the air.\r\n", 60, 10);
   }
 }
 
