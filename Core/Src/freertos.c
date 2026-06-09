@@ -129,6 +129,7 @@ void Lora_WriteReg(uint8_t addr, uint8_t val);
 uint8_t Lora_ReadReg(uint8_t addr);
 void Lora_ReadFIFOVerify(uint8_t *buffer, uint8_t length);
 void Lora_SetFrequency(uint32_t frequency_hz);
+void LoRa_Extract_FIFO_Payload(uint8_t *rx_buffer, uint8_t *payload_length);
 
 // Wear-Leveled Flash Counter Module Drivers
 uint16_t Load_Frame_Counter_Wear_Leveled(void);
@@ -461,6 +462,36 @@ void StartLoRaTask(void *argument)
               // 3. Evaluate matching metrics
               if (rx_notified == pdTRUE && (irqFlags & 0x40) && !(irqFlags & 0x20)) {
                   HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 SUCCESS! Valid ACK packet caught.\r\n", 56, 100);
+                  
+                  // --- START PAYLOAD EXTRACTION ---
+                  uint8_t rx_buffer[64] = {0};
+                  uint8_t payload_length = Lora_ReadReg(0x13); // RegRxNbBytes
+
+                  if (payload_length > 0 && payload_length <= 64) {
+                      // Fetch the starting memory address of the last received packet
+                      uint8_t current_fifo_addr = Lora_ReadReg(0x10); // RegFifoRxCurrentAddr
+                      
+                      // Force the internal SPI pointer to hop to that specific location
+                      Lora_WriteReg(0x0D, current_fifo_addr);         // RegFifoAddrPtr
+
+                      // Sequentially read the bytes directly out of the FIFO data stream
+                      for (uint8_t i = 0; i < payload_length; i++) {
+                          rx_buffer[i] = Lora_ReadReg(0x00);          // RegFifo
+                      }
+
+                      // Print out the raw hexadecimal values over UART
+                      char hex_print_buf[128];
+                      int len = snprintf(hex_print_buf, sizeof(hex_print_buf), "[LoRa] Extracted %d bytes: ", payload_length);
+                      HAL_UART_Transmit(&huart1, (uint8_t*)hex_print_buf, len, 100);
+
+                      for (uint8_t i = 0; i < payload_length; i++) {
+                          len = snprintf(hex_print_buf, sizeof(hex_print_buf), "%02X ", rx_buffer[i]);
+                          HAL_UART_Transmit(&huart1, (uint8_t*)hex_print_buf, len, 100);
+                      }
+                      HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n", 2, 100);
+                  }
+                  // --- END PAYLOAD EXTRACTION ---
+
               } else if (irqFlags & 0x20) {
                   HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Packet caught but failed CRC.\r\n", 52, 100);
               } else {
@@ -470,6 +501,7 @@ void StartLoRaTask(void *argument)
               // Advance to system sleep
               current_state = STATE_SLEEP;
               break;
+
 
 
           case STATE_SLEEP:
@@ -573,6 +605,33 @@ void Lora_SetFrequency(uint32_t frequency_hz)
     Lora_WriteReg(REG_FRF_MSB, (uint8_t)((frf >> 16) & 0xFF));
     Lora_WriteReg(REG_FRF_MID, (uint8_t)((frf >> 8)  & 0xFF));
     Lora_WriteReg(REG_FRF_LSB, (uint8_t)(frf         & 0xFF));
+}
+
+#define REG_FIFO           0x00
+#define REG_FIFO_ADDR_PTR  0x0D
+#define REG_FIFO_RX_CURR   0x10
+#define REG_RX_NB_BYTES    0x13
+
+void LoRa_Extract_FIFO_Payload(uint8_t *rx_buffer, uint8_t *payload_length)
+{
+    // 1. Check how many bytes the gateway actually dropped into our radio
+    *payload_length = Lora_ReadReg(REG_RX_NB_BYTES); 
+
+    // Safety check to ensure we don't overflow an array
+    if (*payload_length == 0 || *payload_length > 64) {
+        return; 
+    }
+
+    // 2. Fetch the starting memory address of the last received packet
+    uint8_t current_fifo_addr = Lora_ReadReg(REG_FIFO_RX_CURR);
+
+    // 3. Force the internal SPI pointer to hop to that specific location
+    Lora_WriteReg(REG_FIFO_ADDR_PTR, current_fifo_addr);
+
+    // 4. Sequentially read the bytes directly out of the FIFO register stream
+    for (uint8_t i = 0; i < *payload_length; i++) {
+        rx_buffer[i] = Lora_ReadReg(REG_FIFO);
+    }
 }
 
 /* USER CODE END Application */
