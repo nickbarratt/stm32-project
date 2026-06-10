@@ -57,6 +57,10 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define RTC_IN_Pin GPIO_PIN_14
+#define RTC_IN_GPIO_Port GPIOC
+#define RTC_OUT_Pin GPIO_PIN_15
+#define RTC_OUT_GPIO_Port GPIOC
 #define LORA_RESET_Pin GPIO_PIN_4
 #define LORA_RESET_GPIO_Port GPIOC
 #define LORA_NSS_Pin GPIO_PIN_5
