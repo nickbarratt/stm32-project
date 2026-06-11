@@ -454,7 +454,7 @@ void StartLoRaTask(void *argument)
 					    Lora_WriteReg(0x0D, rx_base);			      // Reset RegFifoAddrPtr to base point
 					
 					    // 7. THE 980ms FIRST SLEEP PHASE: Wait for the RTC alarm clock to ring
-					    if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 2007, RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
+					    if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 1956, RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
 					    {
 					        Error_Handler();
 					    }
