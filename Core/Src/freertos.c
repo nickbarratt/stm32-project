@@ -310,10 +310,11 @@ void StartLoRaTask(void *argument)
    * 🏭 STAGE A: ONE-TIME BOOT UP HARDWARE VALIDATION
    * ========================================================== */
   HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_RESET);
-  osDelay(10);
+  osDelay(10); // 10 ms delay
   HAL_GPIO_WritePin(LORA_RESET_GPIO_Port, LORA_RESET_Pin, GPIO_PIN_SET);
-  osDelay(10);
+  osDelay(10); // 10 ms delay (requirement is at least 5ms before accessing chip
 
+  // Confirm SPI Interface is working
   uint8_t version = Lora_ReadReg(0x42);
   if (version != 0x12) {
       HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] ERROR: Radio core not found!\r\n", 37, 100);
@@ -321,13 +322,14 @@ void StartLoRaTask(void *argument)
   }
   
   // Baseline modem register alignments
-  Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
+  Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);	// put into sleep mode
   osDelay(10);
-  Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);
-  Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-  Lora_WriteReg(REG_MODEM_CONFIG_1, 0x70); // 125kHz, CR 4/5
-  Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74); // SF7, CRC On
-  Lora_WriteReg(REG_PA_CONFIG, 0x8F);      // PA_BOOST Enabled, Max Power
+  
+  Lora_WriteReg(REG_FIFO_TX_BASE_ADDR, 0x00);	// Reset FIFOs
+  Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);			// Reset FIFOs
+  Lora_WriteReg(REG_MODEM_CONFIG_1, 0x70); 		// 125kHz, CR 4/5
+  Lora_WriteReg(REG_MODEM_CONFIG_2, 0x74); 		// SF7, CRC On
+  Lora_WriteReg(REG_PA_CONFIG, 0x80);      		// low power for ttg-68 in same room - was 0x8F (PA_BOOST Enabled, Max Power)
 
   /* ==========================================================
    * 🔄 STAGE B: THE CORE OS STATE ENGINE LOOP
@@ -369,7 +371,7 @@ void StartLoRaTask(void *argument)
 
               // Staging application tracking structures
               uint8_t app_payload[16];
-              strcpy((char*)app_payload, "HELLO");
+              strcpy((char*)app_payload, "HELLO1");
               uint8_t app_payload_len = strlen((char*)app_payload);
 
               // Encrypt data inline
@@ -392,7 +394,7 @@ void StartLoRaTask(void *argument)
 
               // Push array payload to hardware FIFO
               Lora_WriteReg(REG_FIFO_ADDR_PTR, 0x00);
-              Lora_WriteReg(REG_PAYLOAD_LENGTH, idx); // Removed 0x22 FSK overwrite bug
+              Lora_WriteReg(REG_PAYLOAD_LENGTH, idx);
               for(uint8_t i = 0; i < idx; i++) {
                   Lora_WriteReg(REG_FIFO, packet[i]);
               }
@@ -417,7 +419,7 @@ void StartLoRaTask(void *argument)
               
               // Shift state and fire
               current_state = STATE_TX;
-              Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX);
+              Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX); // actually transmit packet
               break;
 
 
@@ -724,7 +726,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
     // --- ADD THIS NEW BLOCK TO CATCH THE TIMEOUT ---
-    else if (GPIO_Pin == GPIO_PIN_1) // Check if the interrupt came from PE1 (RxTimeout)
+    else if (GPIO_Pin == LORA_DIO1_Pin) // Check if the interrupt came from PE1 (RxTimeout)
     {
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
