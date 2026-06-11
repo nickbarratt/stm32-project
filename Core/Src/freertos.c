@@ -435,9 +435,7 @@ void StartLoRaTask(void *argument)
 					    // 2. Acknowledge and drop the hardware radio TX flag
 					    Lora_WriteReg(0x12, 0x08); 
 					    
-					    // 3. Save current counter immediately to maintain timeline accuracy
-					    Save_Frame_Counter_Wear_Leveled(frame_counter);
-					    frame_counter++; 
+
 					
 					    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: TX Done. Scheduling low-power 980ms wait...\r\n", 61, 100);
 					
@@ -695,8 +693,13 @@ void StartLoRaTask(void *argument)
 
 
           case STATE_SLEEP:
-              HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: SLEEP. Powering down radio for 30s...\r\n", 56, 100);
+              HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: SLEEP. Incrementing frame counter an powering down radio for 30s...\r\n", 56, 100);
               
+              
+              // Save current counter to maintain timeline accuracy
+					    Save_Frame_Counter_Wear_Leveled(frame_counter);
+					    frame_counter++; 
+					    
               // Drop radio core down to micro-amps
               Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_SLEEP);
 
