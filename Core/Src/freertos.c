@@ -22,7 +22,6 @@
 #include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
-#include <limits.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -421,6 +420,11 @@ void StartLoRaTask(void *argument)
               // Shift state and fire
               current_state = STATE_TX;
               Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX); // actually transmit packet
+              
+              // drive gpio pin high
+              HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_SET);
+
+              
               break;
 
 
@@ -437,61 +441,79 @@ void StartLoRaTask(void *argument)
 					
 					    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: TX Done. Scheduling low-power 980ms wait...\r\n", 61, 100);
 					
-	    // 4. Shift modem parameters over to Receive mappings while in Standby
-    Lora_WriteReg(REG_DIO_MAPPING_1, 0x00); // Re-map DIO0 to watch for RxDone
-    Lora_WriteReg(0x33, 0x66);              // Invert IQ for gateway synchronization
-    Lora_WriteReg(0x3B, 0x19);              // Invert IQ 2 (SX1276 critical patch)
-    
-    // 5. FIX: Hard-write 0x1E instead of read-modifying to prevent Spreading Factor corruption.
-    // 0x73 = Spreading Factor 7 (0x70) | No continuous mode (0x00) | No Rx CRC (0x00) | SymbTimeout MSB (0x03)
-    Lora_WriteReg(0x1E, 0x73); 
-    Lora_WriteReg(0x1F, 0xFF);              // Max out the lower 8 bits of SymbTimeout to 255
-    
-    // 6. FIX: Reset the internal FIFO pointer to the RX base address before listening
-    uint8_t rx_base_addr = Lora_ReadReg(0x0F); // Read RegFifoRxBaseAddr
-    Lora_WriteReg(0x0D, rx_base_addr);         // Reset RegFifoAddrPtr to base point
-
-    // 7. THE 980ms FIRST SLEEP PHASE: Wait for the RTC alarm clock to ring
-    if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 2007, RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
+						  // 4. Shift modem parameters over to Receive mappings while in Standby
+					    Lora_WriteReg(REG_DIO_MAPPING_1, 0x00); // Re-map DIO0 to watch for RxDone
+					    Lora_WriteReg(0x33, 0x66);              // Invert IQ for gateway synchronization
+					    Lora_WriteReg(0x3B, 0x19);              // Invert IQ 2 (SX1276 critical patch)
 					    
+					    // 5. FIX: Hard-write 0x1E instead of read-modifying to prevent Spreading Factor corruption.
+					    // 0x73 = Spreading Factor 7 (0x70) | No continuous mode (0x00) | No Rx CRC (0x00) | SymbTimeout MSB (0x03)
+					    Lora_WriteReg(0x1E, 0x73); 
+					    Lora_WriteReg(0x1F, 0xFF);              // Max out the lower 8 bits of SymbTimeout to 255
+					    
+					    // 6. FIX: Reset the internal FIFO pointer to the RX base address before listening
+					    rx_base = Lora_ReadReg(0x0F); 					// Read RegFifoRxBaseAddr
+					    Lora_WriteReg(0x0D, rx_base);			      // Reset RegFifoAddrPtr to base point
+					
+					    // 7. THE 980ms FIRST SLEEP PHASE: Wait for the RTC alarm clock to ring
+					    if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 2007, RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
+					    {
+					        Error_Handler();
+					    }
+					    
+					        // Clear all pending flags before sleeping
+    					__HAL_RTC_WAKEUPTIMER_CLEAR_FLAG(&hrtc, RTC_FLAG_WUTF);
+    					__HAL_RTC_WAKEUPTIMER_EXTI_CLEAR_FLAG();
+    					__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+    
 					    vTaskSuspendAll();
+					    HAL_SuspendTick(); // <-- ADD THIS to stop the 1ms system timer from waking the CPU
+					    
+					    uint32_t systick_ctrl_backup = SysTick->CTRL;
+    					SysTick->CTRL &= ~(SysTick_CTRL_ENABLE_Msk | SysTick_CTRL_TICKINT_Msk);
+    
+					    __disable_irq();
+					    
 					    HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 					    
 					    // ====================================================================
 					    // WAKEUP EVENT 1: The 980ms RTC Alarm expires! The MCU resumes here.
 					    // ====================================================================
 					    SystemClock_Config(); 
+					    
+					    // --- RESTORE SYSTICK PERIPHERAL ---
+    					SysTick->CTRL = systick_ctrl_backup;
+    
+					    __enable_irq();
 					    HAL_ResumeTick();     
 					    xTaskResumeAll();     
 					    
 					    HAL_RTCEx_DeactivateWakeUpTimer(&hrtc); 
 	
-	   // 7. Strobe the radio into active single-receive mode
-    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
-    				
-    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> RTC Alert! Opening RX1 window precisely on time...\r\n", 61, 100);
-
- 
- //   HAL_Delay(2); 
-
-    // --- NEW DIAGNOSTIC READBACK BLOCK ---
-    uint8_t verified_mode = Lora_ReadReg(0x01); // Read REG_OP_MODE
-    uint8_t verified_flags = Lora_ReadReg(0x12); // Read REG_IRQ_FLAGS
-    
-    char debug_msg[128];
-    int debug_len = snprintf(debug_msg, sizeof(debug_msg), 
-                             "[LoRa Diagnostic] Mode Reg: 0x%02X | IRQ Flags: 0x%02X\r\n", 
-                             verified_mode, verified_flags);
-    HAL_UART_Transmit(&huart1, (uint8_t*)debug_msg, debug_len, 100);
-    // -------------------------------------
-
-    // Move state pointer forward to the receive state
-    current_state = STATE_RX1;
-    break; 
+						   // 7. Strobe the radio into active single-receive mode
+					    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
+					    
+					    // drive gpio pin low
+              HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_RESET);					    
+					    				
+					    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> RTC Alert! Opening RX1 window precisely on time...\r\n", 61, 100);
+									 
+					 			
+					    // --- NEW DIAGNOSTIC READBACK BLOCK ---
+					    uint8_t verified_mode = Lora_ReadReg(0x01); // Read REG_OP_MODE
+					    uint8_t verified_flags = Lora_ReadReg(0x12); // Read REG_IRQ_FLAGS
+					    
+					    char debug_msg[128];
+					    int debug_len = snprintf(debug_msg, sizeof(debug_msg), 
+					                             "[LoRa Diagnostic] Mode Reg: 0x%02X | IRQ Flags: 0x%02X\r\n", 
+					                             verified_mode, verified_flags);
+					                             
+					    HAL_UART_Transmit(&huart1, (uint8_t*)debug_msg, debug_len, 100);
+					    // -------------------------------------
+					
+					    // Move state pointer forward to the receive state
+					    current_state = STATE_RX1;
+					    break; 
 
 				 case STATE_RX1:
 				    // 1. THE SECOND SLEEP PHASE: Safely lock the MCU core down *inside* the state itself

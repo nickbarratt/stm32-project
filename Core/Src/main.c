@@ -123,7 +123,6 @@ int main(void)
   MX_SPI2_Init();
   MX_TIM2_Init();
   MX_RTC_Init();
-  
   /* USER CODE BEGIN 2 */
 // Pristine, safe startup scanner without any task management blocks
 printf("\r\n--- [Full-Sector 7 Scanner Active] ---\r\n");

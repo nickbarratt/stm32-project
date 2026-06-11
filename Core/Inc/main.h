@@ -65,6 +65,8 @@ void Error_Handler(void);
 #define LORA_RESET_GPIO_Port GPIOC
 #define LORA_NSS_Pin GPIO_PIN_5
 #define LORA_NSS_GPIO_Port GPIOC
+#define Debug_IO_Pin GPIO_PIN_12
+#define Debug_IO_GPIO_Port GPIOE
 #define LORA_DIO0_Pin GPIO_PIN_0
 #define LORA_DIO0_GPIO_Port GPIOE
 #define LORA_DIO0_EXTI_IRQn EXTI0_IRQn
