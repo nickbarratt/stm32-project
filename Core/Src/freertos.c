@@ -305,6 +305,7 @@ void StartLoRaTask(void *argument)
   uint8_t packet[64]; 
   uint8_t idx = 0;
   uint8_t irqFlags = 0;
+  uint8_t rx_base;
 
   /* ==========================================================
    * 🏭 STAGE A: ONE-TIME BOOT UP HARDWARE VALIDATION
@@ -528,7 +529,8 @@ void StartLoRaTask(void *argument)
 				    Lora_WriteReg(0x12, 0xFF); 
 				
 				    // 4. Evaluate matching metrics (PayloadReady is High, PayloadCrcError is Low)
-				    if ((irqFlags & 0x40) && !(irqFlags & 0x20)) {
+				    if ((irqFlags & 0x40) && !(irqFlags & 0x20))
+				    {
 				        HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 SUCCESS! Valid ACK packet caught.\r\n", 56, 100);
 				        
 				        uint8_t payload_length = Lora_ReadReg(0x13); // RegRxNbBytes
@@ -554,44 +556,50 @@ void StartLoRaTask(void *argument)
 				            }
 				            HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n", 2, 100);
 				        }
-               } else if (irqFlags & 0x20) {
-                  HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Packet caught but failed CRC.\r\n", 52, 100);
-                  
-                  // Handle CRC failure by routing to sleep normally
-                  Lora_WriteReg(0x01, 0x80 | 0x01);     // Force Standby mode
-                  uint8_t rx_base = Lora_ReadReg(0x0F); // Read RegFifoRxBaseAddr
-                  Lora_WriteReg(0x0D, rx_base);         // Reset RegFifoAddrPtr to base point
-                  current_state = STATE_SLEEP;
-              } else {
-                  // --- ROUTE TIMEOUT TO RX2 INSTEAD OF SLEEP ---
-                  HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> RX1 Timeout. Pivoting to RX2 (869.525MHz, SF9)...\r\n", 59, 100);
-                  
-                  // Move to Standby briefly to change config registers safely
-                  Lora_WriteReg(0x01, 0x80 | 0x01); 
-                  
-                  // Reprogram to mandatory EU868 RX2 fixed frequency
-                  Lora_SetFrequency(869525000); 
-                  
-                  // Set Spreading Factor 9 (SF9) for RX2 window
-                  Lora_WriteReg(0x1E, 0x93); 
-                  Lora_WriteReg(0x1F, 0xFF); 
-                  
-                  // Reset FIFO memory pointers to base RX block
-                  uint8_t rx_base_addr = Lora_ReadReg(0x0F);
-                  Lora_WriteReg(0x0D, rx_base_addr);
-                  
-                  // Strobe the radio receiver into active single-receive mode
-                  Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
-                  HAL_Delay(2); // Let fractional-N synthesizer lock onto 869.525MHz
-                  
-                  // Update state machine pointer to look at the new block next loop
-                  current_state = STATE_RX2;
-              }
+				        // Return to Sleep to wait for next transmit
+                Lora_WriteReg(0x01, 0x80 | 0x01);     // Force Standby mode
+                rx_base = Lora_ReadReg(0x0F); 				// Read RegFifoRxBaseAddr
+                Lora_WriteReg(0x0D, rx_base);         // Reset RegFifoAddrPtr to base point
+				        current_state = STATE_SLEEP;
+            }
+            else if (irqFlags & 0x20)
+            {
+                HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: RX1 Packet caught but failed CRC.\r\n", 52, 100);
+                
+                // Handle CRC failure by routing to sleep normally
+                Lora_WriteReg(0x01, 0x80 | 0x01);     // Force Standby mode
+                rx_base = Lora_ReadReg(0x0F); 				// Read RegFifoRxBaseAddr
+                Lora_WriteReg(0x0D, rx_base);         // Reset RegFifoAddrPtr to base point
+                current_state = STATE_SLEEP;
+            } 
+            else
+            {
+                // --- ROUTE TIMEOUT TO RX2 INSTEAD OF SLEEP ---
+                HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> RX1 Timeout. Pivoting to RX2 (869.525MHz, SF9)...\r\n", 59, 100);
+                
+                // Move to Standby briefly to change config registers safely
+                Lora_WriteReg(0x01, 0x80 | 0x01); 
+                
+                // Reprogram to mandatory EU868 RX2 fixed frequency
+                Lora_SetFrequency(869525000); 
+                
+                // Set Spreading Factor 9 (SF9) for RX2 window
+                Lora_WriteReg(0x1E, 0x93); 
+                Lora_WriteReg(0x1F, 0xFF); 
+                
+                // Reset FIFO memory pointers to base RX block
+                uint8_t rx_base_addr = Lora_ReadReg(0x0F);
+                Lora_WriteReg(0x0D, rx_base_addr);
+                
+                // Strobe the radio receiver into active single-receive mode
+                Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
+                HAL_Delay(2); // Let fractional-N synthesizer lock onto 869.525MHz
+                
+                // Update state machine pointer to look at the new block next loop
+                current_state = STATE_RX2;
+             }
               
-              break; // Master break cleanly exits STATE_RX1
-
-
-
+             break; // Master break cleanly exits STATE_RX1
 
           case STATE_RX2:
               // 1. THE LOW-POWER WAITING PHASE: Suspend task ticks and sleep the STM32F4 core
