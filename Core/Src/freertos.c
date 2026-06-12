@@ -381,7 +381,7 @@ void StartLoRaTask(void *argument)
 
               // Staging application tracking structures
               uint8_t app_payload[16];
-              strcpy((char*)app_payload, "HELLO1 accurate");
+              strcpy((char*)app_payload, "HELLO0");
               uint8_t app_payload_len = strlen((char*)app_payload);
 
               // Encrypt data inline
@@ -800,12 +800,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	  if (DIO0_Line_current_state == STATE_WAITING_FOR_TX)
         {
         	
-            // Drive gpio pin high - this is our 0s timing point
-            HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_SET);
-
             // Start your microsecond stopwatch right here 
             __HAL_TIM_SET_COUNTER(&htim5, 0);
             HAL_TIM_Base_Start(&htim5);
+            
+            // Drive gpio pin high - this is our 0s timing point
+            HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_SET);
+
+
         }
         
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
