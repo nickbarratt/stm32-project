@@ -485,7 +485,7 @@ void StartLoRaTask(void *argument)
 	
 				        vTaskDelay(pdMS_TO_TICKS(60000)); 				    
 			        
-							if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 3413, /*dynamic_rtc_ticks,*/ RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
+							if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, dynamic_rtc_ticks, /*dynamic_rtc_ticks,*/ RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
 					    {
 					        Error_Handler();
 				    	}
