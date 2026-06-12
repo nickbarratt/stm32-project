@@ -445,9 +445,9 @@ void StartLoRaTask(void *argument)
 					    Lora_WriteReg(0x3B, 0x19);              // Invert IQ 2 (SX1276 critical patch)
 					    
 					    // 5. FIX: Hard-write 0x1E instead of read-modifying to prevent Spreading Factor corruption.
-					    // 0x73 = Spreading Factor 7 (0x70) | No continuous mode (0x00) | No Rx CRC (0x00) | SymbTimeout MSB (0x03)
-					    Lora_WriteReg(0x1E, 0x73); 
-					    Lora_WriteReg(0x1F, 0xFF);              // Max out the lower 8 bits of SymbTimeout to 255
+					    // 0x73 = Spreading Factor 7 (0x70) | No continuous mode (0x00) | No Rx CRC (0x00) | SymbTimeout MSB (0x00)
+					    Lora_WriteReg(0x1E, 0x70); 
+					    Lora_WriteReg(0x1F, 0x10);            
 					    
 					    // 6. FIX: Reset the internal FIFO pointer to the RX base address before listening
 					    rx_base = Lora_ReadReg(0x0F); 					// Read RegFifoRxBaseAddr
@@ -491,8 +491,10 @@ void StartLoRaTask(void *argument)
 						   // 7. Strobe the radio into active single-receive mode
 					    Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_RX_SINGLE);
 					    
-					    // drive gpio pin low
-              HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_RESET);					    
+					    // drive debug pin low
+              HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_RESET);			
+              // drive timing pin low
+              HAL_GPIO_WritePin(Timing_IO_GPIO_Port, Timing_IO_Pin, GPIO_PIN_SET);			    
 					    				
 					    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> RTC Alert! Opening RX1 window precisely on time...\r\n", 61, 100);
 									 
@@ -742,10 +744,15 @@ uint8_t Lora_ReadReg(uint8_t addr) {
     return val;
 }
 
-// This function automatically fires the exact millisecond a packet leaves the antenna
 // This function automatically fires the exact millisecond a packet leaves the antenna or a timeout occurs
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+	    if (GPIO_Pin == LORA_DIO0_Pin || GPIO_Pin == LORA_DIO1_Pin) 
+    {
+        // Explicitly drop Channel 2 (Debug_IO) the microsecond the radio fires
+        HAL_GPIO_WritePin(Timing_IO_GPIO_Port, Timing_IO_Pin, GPIO_PIN_RESET);
+    }
+    
     if (GPIO_Pin == LORA_DIO0_Pin) // Check if the interrupt came from PE0 (RxDone / TxDone)
     {
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
