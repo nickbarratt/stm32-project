@@ -479,11 +479,11 @@ void StartLoRaTask(void *argument)
 			        
 
 			        
-			        printf("dynamic_rtc_ticks = %ld \r\n", dynamic_rtc_ticks);
+			   //     printf("dynamic_rtc_ticks = %ld \r\n", dynamic_rtc_ticks);
 			        
 	
 	
-				        vTaskDelay(pdMS_TO_TICKS(60000)); 				    
+				//        vTaskDelay(pdMS_TO_TICKS(60000)); 				    
 			        
 							if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, dynamic_rtc_ticks, /*dynamic_rtc_ticks,*/ RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
 					    {
