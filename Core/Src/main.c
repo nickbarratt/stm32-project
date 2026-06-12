@@ -123,6 +123,7 @@ int main(void)
   MX_SPI2_Init();
   MX_TIM2_Init();
   MX_RTC_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
 // Pristine, safe startup scanner without any task management blocks
 printf("\r\n--- [Full-Sector 7 Scanner Active] ---\r\n");
@@ -151,6 +152,7 @@ printf("[LoRa] Recovered Frame Counter from Flash: %d\r\n", frame_counter);
   printf("PWM System Active at 1kHz\r\n");
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_Base_Start(&htim5);
 	
   // Enable Clock for Port A
   __HAL_RCC_GPIOA_CLK_ENABLE();

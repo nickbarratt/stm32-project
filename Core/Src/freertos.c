@@ -31,6 +31,7 @@
 // Hardware Handle Linkage from main.c
 extern TIM_HandleTypeDef htim1;  
 extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim5;
 extern UART_HandleTypeDef huart1;
 extern SPI_HandleTypeDef hspi2;
 extern RTC_HandleTypeDef hrtc;
@@ -99,6 +100,15 @@ typedef enum {
 } LoraState_t;
 
 static LoraState_t current_state = STATE_INIT;
+
+typedef enum {
+    STATE_IDLE,
+    STATE_WAITING_FOR_TX,
+    STATE_WAITING_FOR_RX
+} DIO0_Line_State_t;
+
+volatile DIO0_Line_State_t DIO0_Line_current_state = STATE_IDLE;
+
 const uint32_t eu868_channels[3] = {868100000, 868300000, 868500000};
 static uint8_t channel_index = 0;
 uint8_t lora_rx_packet_buffer[256];
@@ -371,7 +381,7 @@ void StartLoRaTask(void *argument)
 
               // Staging application tracking structures
               uint8_t app_payload[16];
-              strcpy((char*)app_payload, "HELLO1");
+              strcpy((char*)app_payload, "HELLO1 accurate");
               uint8_t app_payload_len = strlen((char*)app_payload);
 
               // Encrypt data inline
@@ -419,11 +429,11 @@ void StartLoRaTask(void *argument)
               
               // Shift state and fire
               current_state = STATE_TX;
+              
+              DIO0_Line_current_state = STATE_WAITING_FOR_TX;
+              
               Lora_WriteReg(REG_OP_MODE, MODE_LONG_RANGE_MODE | MODE_TX); // actually transmit packet
               
-              // drive gpio pin high
-              HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_SET);
-
               
               break;
 
@@ -432,14 +442,13 @@ void StartLoRaTask(void *argument)
 					    // 1. Synchronously wait for the physical transmission to clear the airwaves (PE0 / EXTI0)
 					    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 					    
-					    // 2. Acknowledge and drop the hardware radio TX flag
+             
+              // 3. Acknowledge and clear the hardware radio TX flag
 					    Lora_WriteReg(0x12, 0x08); 
-					    
-
+					    					
+					    //HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: TX Done. Scheduling low-power 980ms wait...\r\n", 61, 100);
 					
-					    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> State: TX Done. Scheduling low-power 980ms wait...\r\n", 61, 100);
-					
-						  // 4. Shift modem parameters over to Receive mappings while in Standby
+						  // 4. Shift modem parameters over to Receive mappings while in Standby (Standby mode is entered in automatically by the SX1276 when the irq TXDone is received
 					    Lora_WriteReg(REG_DIO_MAPPING_1, 0x00); // Re-map DIO0 to watch for RxDone
 					    Lora_WriteReg(0x33, 0x66);              // Invert IQ for gateway synchronization
 					    Lora_WriteReg(0x3B, 0x19);              // Invert IQ 2 (SX1276 critical patch)
@@ -454,11 +463,38 @@ void StartLoRaTask(void *argument)
 					    Lora_WriteReg(0x0D, rx_base);			      // Reset RegFifoAddrPtr to base point
 					
 					    // 7. THE 980ms FIRST SLEEP PHASE: Wait for the RTC alarm clock to ring
-					    if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 1956, RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
+					    
+					    // Snapshot the total elapsed time (includes context switch + all SPI operations above)
+			        uint32_t elapsed_processing_time_us = __HAL_TIM_GET_COUNTER(&htim5);
+			        HAL_TIM_Base_Stop(&htim5); // Sßtop stopwatch
+			
+			        const uint32_t TARGET_WINDOW_US = 1000000;     // 1.000000 second target
+			        const uint32_t STM32F4_WAKEUP_LATENCY_US = 30;  // Datasheet constant
+			
+			        // Calculate exact remaining deep-sleep duration needed
+			        uint32_t actual_sleep_needed_us = TARGET_WINDOW_US - elapsed_processing_time_us - STM32F4_WAKEUP_LATENCY_US;
+			
+			        // Convert microseconds to precise LSE 2048Hz ticks
+			        uint32_t dynamic_rtc_ticks = (actual_sleep_needed_us * 2048) / 1000000;
+			        
+
+			        
+			        printf("dynamic_rtc_ticks = %ld \r\n", dynamic_rtc_ticks);
+			        
+	
+	
+				        vTaskDelay(pdMS_TO_TICKS(60000)); 				    
+			        
+							if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 3413, /*dynamic_rtc_ticks,*/ RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
 					    {
 					        Error_Handler();
-					    }
-					    
+				    	}
+	
+						//  if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 2047, RTC_WAKEUPCLOCK_RTCCLK_DIV16) != HAL_OK)
+					 //   {
+					 //       Error_Handler();
+					 //   }
+					    				    
 					        // Clear all pending flags before sleeping
     					__HAL_RTC_WAKEUPTIMER_CLEAR_FLAG(&hrtc, RTC_FLAG_WUTF);
     					__HAL_RTC_WAKEUPTIMER_EXTI_CLEAR_FLAG();
@@ -494,7 +530,11 @@ void StartLoRaTask(void *argument)
 					    // drive debug pin low
               HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_RESET);			
               // drive timing pin low
-              HAL_GPIO_WritePin(Timing_IO_GPIO_Port, Timing_IO_Pin, GPIO_PIN_SET);			    
+              HAL_GPIO_WritePin(Timing_IO_GPIO_Port, Timing_IO_Pin, GPIO_PIN_SET);	
+              
+							// Update state so the next DIO0 interrupt is processed as an RX packet
+							DIO0_Line_current_state = STATE_WAITING_FOR_RX;
+		    
 					    				
 					    HAL_UART_Transmit(&huart1, (uint8_t*)"[LoRa] -> RTC Alert! Opening RX1 window precisely on time...\r\n", 61, 100);
 									 
@@ -592,7 +632,7 @@ void StartLoRaTask(void *argument)
                 Lora_WriteReg(0x01, 0x80 | 0x01);     // Force Standby mode
                 rx_base = Lora_ReadReg(0x0F); 				// Read RegFifoRxBaseAddr
                 Lora_WriteReg(0x0D, rx_base);         // Reset RegFifoAddrPtr to base point
-                current_state = STATE_SLEEP;
+                current_state = STATE_RX2;
             } 
             else
             {
@@ -620,6 +660,8 @@ void StartLoRaTask(void *argument)
                 // Update state machine pointer to look at the new block next loop
                 current_state = STATE_RX2;
              }
+             
+             DIO0_Line_current_state = STATE_IDLE; 
               
              break; // Master break cleanly exits STATE_RX1
 
@@ -747,14 +789,25 @@ uint8_t Lora_ReadReg(uint8_t addr) {
 // This function automatically fires the exact millisecond a packet leaves the antenna or a timeout occurs
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	    if (GPIO_Pin == LORA_DIO0_Pin || GPIO_Pin == LORA_DIO1_Pin) 
-    {
-        // Explicitly drop Channel 2 (Debug_IO) the microsecond the radio fires
-        HAL_GPIO_WritePin(Timing_IO_GPIO_Port, Timing_IO_Pin, GPIO_PIN_RESET);
-    }
+	//  if (GPIO_Pin == LORA_DIO0_Pin || GPIO_Pin == LORA_DIO1_Pin) 
+  ///  {
+  //      // Explicitly drop Channel 2 (Debug_IO) the microsecond the radio fires
+   //     HAL_GPIO_WritePin(Timing_IO_GPIO_Port, Timing_IO_Pin, GPIO_PIN_RESET);
+   //ß }
     
     if (GPIO_Pin == LORA_DIO0_Pin) // Check if the interrupt came from PE0 (RxDone / TxDone)
     {
+    	  if (DIO0_Line_current_state == STATE_WAITING_FOR_TX)
+        {
+        	
+            // Drive gpio pin high - this is our 0s timing point
+            HAL_GPIO_WritePin(Debug_IO_GPIO_Port, Debug_IO_Pin, GPIO_PIN_SET);
+
+            // Start your microsecond stopwatch right here 
+            __HAL_TIM_SET_COUNTER(&htim5, 0);
+            HAL_TIM_Base_Start(&htim5);
+        }
+        
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
         // ONLY notify the waiting FreeRTOS task. Do no SPI, do no UART!
